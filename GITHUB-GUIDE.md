@@ -1,116 +1,287 @@
 # How to use this repository
 
-This repo is shared by everyone working on **05 · Recovery Manager**. About a hundred people work in it at once. That only works if everyone follows the same four rules:
+This repo is the official starting point for **05 · Recovery Manager**.
 
-1. **One branch per person.** Name it exactly your GitHub username.
-2. **One folder per person.** Everything you add goes in `submissions/<your-github-username>/`.
-3. **You never push to `main`.** You open a pull request (PR) from your branch into `main`.
-4. **Only the organisers merge.** Your PR is reviewed and merged by **@Cube-Buildathon**. Nobody else can merge into `main`, and GitHub enforces this.
+Round 2 is an **individual build**, and each participant works in their **own GitHub fork**.
 
-An automatic check runs on every PR. It **fails** if your branch name doesn't match your username, or if you changed any file outside your own folder. That check is what stops a hundred people from overwriting each other.
+The workflow is:
+
+```text id="a9p4sg"
+Official Repository
+        ↓
+      Fork
+        ↓
+ Your GitHub Fork
+        ↓
+ Build + Test
+        ↓
+ Commit + Push
+        ↓
+ Final Submission
+```
+
+**New here? Read these first:**
+
+1. [`README.md`](README.md) explains the Recovery Manager problem, data and build expectations.
+2. [`RULES.md`](RULES.md) covers the repository and engineering rules.
 
 ---
 
 ## 0. One-time setup
 
-You need `git` installed and a GitHub account that has been added to this repository. If you can't push, you haven't been added yet. Ask an organiser.
+You need `git` installed and a GitHub account.
 
 Set your identity once, if you haven't before:
 
-```sh
+```sh id="y3b1xg"
 git config --global user.name  "Your Name"
 git config --global user.email "you@example.com"   # use the email on your GitHub account
 ```
 
-If you use SSH, check it works with `ssh -T git@github.com`. It should greet you by username. If you'd rather use HTTPS, the easiest way to sign in is the GitHub CLI: `gh auth login`.
+If you use SSH, check it works with `ssh -T git@github.com`. It should greet you by username. If you'd rather use HTTPS, the easiest way to sign in is the GitHub CLI:
 
-## 1. Clone the repo
+```sh id="o9a2f4"
+gh auth login
+```
 
-```sh
-git clone git@github.com:Cube-Build-A-Thon/cube-05-recovery-manager.git
+## 1. Fork and clone the repo
+
+First, fork the official repository into your own GitHub account:
+
+```text id="1b1x2m"
+https://github.com/Cube-Build-A-Thon/cube-05-recovery-manager
+```
+
+Then clone **your fork**.
+
+### SSH
+
+```sh id="58j3qx"
+git clone git@github.com:<your-github-username>/cube-05-recovery-manager.git
 cd cube-05-recovery-manager
 ```
 
-HTTPS works too: `git clone https://github.com/Cube-Build-A-Thon/cube-05-recovery-manager.git`
+### HTTPS
 
-## 2. Create your branch
-
-Use your **GitHub username** as the branch name. It is case-insensitive, but lowercase is safest.
-
-```sh
-git checkout main
-git pull
-git checkout -b <your-github-username>
+```sh id="p7v5cd"
+git clone https://github.com/<your-github-username>/cube-05-recovery-manager.git
+cd cube-05-recovery-manager
 ```
 
-Example: if your username is `priya-k`, your branch is `priya-k`.
+Replace `<your-github-username>` with your GitHub username.
 
-## 3. Create your folder
+## 2. Start building
 
-```sh
-mkdir -p submissions/<your-github-username>
-cp submissions/_TEMPLATE/README.md submissions/<your-github-username>/README.md
+You do **not** need to create a participant branch or participant folder in the organiser repository.
+
+Build your Recovery Manager directly inside your own fork.
+
+You may use `main` or create your own development branches inside your fork.
+
+For example:
+
+```sh id="h7v2kr"
+git checkout -b feature/recovery-reasoning
 ```
 
-Put everything in here: your customer letter, PR/FAQ, one-pager, CLAUDE.md, build brief, build log, eval report and code. The expected layout is in [`submissions/_TEMPLATE/README.md`](submissions/_TEMPLATE/README.md).
+A simple development flow is:
 
-**Do not edit** anything outside your folder. That includes the shared `data/` files, the top-level docs, `.github/`, and other people's folders. If you think a shared file is wrong, open an **Issue** instead (see section 7).
+```text id="j3r8na"
+Understand
+    ↓
+Build
+    ↓
+Test
+    ↓
+Evaluate
+    ↓
+Document
+    ↓
+Demo / Deploy
+    ↓
+Submit
+```
+
+See [`README.md`](README.md) for the Recovery Manager requirements.
+
+## 3. Organise your project
+
+You are free to choose your own project structure.
+
+For example:
+
+```text id="k0t6eu"
+cube-05-recovery-manager/
+├── data/
+├── src/
+├── tests/
+├── README.md
+├── RULES.md
+├── GITHUB-GUIDE.md
+├── ARCHITECTURE.md
+└── ...
+```
+
+This is only an example. Your final repository should be clear and easy to run.
+
+You do not need to create:
+
+```text id="p1y6rv"
+submissions/<your-github-username>/
+```
+
+in the organiser repository.
 
 ## 4. Commit and push, often
 
-```sh
-git add submissions/<your-github-username>/
-git commit -m "Face 1: customer letter first draft"
-git push -u origin <your-github-username>     # -u is only needed the first time
+Commit your development work regularly.
+
+```sh id="a3w8zd"
+git status
+git add .
+git commit -m "Implement recovery reasoning"
+git push origin main
 ```
 
-After the first push, `git push` is enough. Push at least once a day. Your branch is your backup, and organisers read your build log from it.
+If you are working on your own branch:
 
-Never commit secrets: API keys, `.env` files, passwords, tokens. Use a `.env` file and keep it out of git by adding it to `.gitignore` inside your folder. If you do push a key by accident, **revoke the key immediately**. Deleting the commit doesn't help, because it has already been exposed.
+```sh id="n9v4qa"
+git push -u origin feature/recovery-reasoning
+```
 
-## 5. Open a pull request into `main`
+After the first push, `git push` is enough when your upstream branch is configured.
 
-Open a PR when you're ready to submit a deliverable, for example at the end of a face:
+Use meaningful commit messages, for example:
 
-1. Go to `https://github.com/Cube-Build-A-Thon/cube-05-recovery-manager`
-2. GitHub usually shows a **"Compare & pull request"** banner for your branch. Click it. If there's no banner, go to **Pull requests → New pull request**, set **base: `main`** and **compare: `<your-github-username>`**.
-3. Title it like this: `[<your-github-username>] Face 1 – customer letter, PR/FAQ, one-pager`
-4. Fill in the PR template checklist.
-5. Click **Create pull request**.
+```text id="x2n6pw"
+Implement fee report parsing
+Add charge-to-unit matching
+Add evidence reasoning
+Add claim decision logic
+Add uncertainty handling
+Add evaluation metrics
+```
 
-Or from the terminal: `gh pr create --base main --fill`
+Avoid unclear messages such as:
 
-Keep **one open PR** for your branch. New pushes to the branch are added to the same PR automatically. There's no need to open a new one per commit.
+```text id="c5v7ly"
+update
+changes
+final
+final2
+fix
+```
+
+### Build-phase commit rule
+
+All code commits forming your Round 2 submission must be made during the **authorised build phase**.
+
+Round 2 build begins:
+
+**25 September 2026 · 9:00 AM IST**
+
+Once the build phase ends, do not continue making Round 2 code changes.
+
+## 5. No pull request is required
+
+Your Round 2 work does **not** need to be submitted through a pull request to the organiser repository.
+
+There is no requirement to:
+
+* open a PR into the organiser's `main`,
+* wait for an organiser merge,
+* create a username branch in the organiser repository,
+* or use `submissions/<your-github-username>/`.
+
+Your own fork is your development and submission repository.
 
 ## 6. What happens next
 
-- The **submission-guard** check runs within a minute. A green tick means you're fine. A red X means it tells you exactly which file or branch-name problem to fix. Fix it, push again, and it re-runs.
-- **@Cube-Buildathon** reviews and merges. You can't merge it yourself, and neither can other contestants.
-- After it merges, keep working on the **same branch**. Run `git pull origin main` first to pick up everyone else's merged work.
+When you are ready to submit, use the official Cube Buildathon submission form.
+
+### Important dates
+
+* **Build begins:** 25 September 2026 · 9:00 AM IST
+* **Submissions open:** 27 September 2026
+* **Final submission deadline:** 1 October 2026 · 6:00 PM IST
+
+The submission form closes permanently at the final deadline.
+
+**There is no reopening and no resubmission.**
+
+Before submitting, verify that your repository, documentation, evaluation results, demo and required links are final.
 
 ## 7. Asking for help, or reporting a problem
 
-- **Something in the shared data or docs is wrong or contradicts itself**: open an Issue with the label `finding`. The brief says contradictions are findings, so raise them rather than silently picking one.
-- **Access or permission problems**: open an Issue with the label `access`, or message an organiser.
-- **Cross-pod contract discussion** (how your record shape connects to other pods): use this repo's **Discussions** tab if it's enabled, otherwise an Issue with the label `contract`.
+* **Something in the shared data or docs is wrong or contradicts itself:** raise it with the organisers and identify it as a `finding`. Do not silently modify the official repository.
+* **Access or permission problems:** make sure you are signed in to the GitHub account that owns your fork, or contact an organiser.
+* **Cross-manager integration questions:** use the official Buildathon communication channels and evidence-contract guidance provided by the organisers.
 
 ## Common problems
 
-| Symptom | Fix |
-|---|---|
-| `remote: Permission to ... denied` | You haven't been added as a collaborator yet, or you're signed in as a different GitHub account. |
-| `protected branch hook declined` when pushing | You tried to push to `main`. Push to your own branch: `git push origin <your-github-username>` |
-| Check fails: *branch name does not match* | Rename the branch: `git branch -m <your-github-username>`, then `git push origin -u <your-github-username>`, then open a new PR from it and close the old one. |
-| Check fails: *files outside submissions/<you>/* | Undo those changes, for example `git checkout origin/main -- data/receiving_sample.csv`, then commit and push. |
-| `rejected ... (fetch first)` | Someone, or you on another machine, pushed to your branch. Run `git pull --rebase`, then `git push`. |
-| Merge conflict after `git pull origin main` | This should only happen inside your own folder. Open the file, keep the version you want, `git add` it, then `git commit`. |
+| Symptom                         | Fix                                                                                               |
+| ------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `remote: Repository not found`  | Make sure you cloned **your own fork** and the repository URL is correct.                         |
+| `remote: Permission denied`     | Check that you are authenticated to the GitHub account that owns your fork.                       |
+| `rejected ... (fetch first)`    | Run `git pull --rebase`, resolve any conflicts, then `git push`.                                  |
+| Push rejected                   | Make sure you are pushing to your own fork and the correct branch.                                |
+| Merge conflict                  | Open the affected file, resolve the conflict, then `git add` and `git commit`.                    |
+| Environment not working         | Check the README setup instructions, dependencies and environment variables.                      |
+| Model/API failure               | Preserve the available information and move the case into an appropriate pending/review state.    |
+| Missing evidence                | Do not invent evidence. Use an appropriate `UNCERTAIN` or review outcome.                         |
+| Accidentally committed a secret | **Revoke the credential immediately**, then remove it from the repository history as appropriate. |
+
+## Never commit secrets
+
+Never commit:
+
+* API keys,
+* `.env` files containing secrets,
+* passwords,
+* access tokens,
+* private credentials.
+
+Use environment variables instead.
+
+If you do push a key by accident, **revoke the key immediately**. Deleting the commit alone does not make an exposed credential safe.
 
 ## Commands you'll use every day
 
-```sh
-git status                                   # what changed
-git add submissions/<you>/ && git commit -m "..."
-git push                                     # send to your branch
-git pull origin main                         # pick up merged work from main
-git log --oneline -10                        # recent history
+```sh id="m8q3sv"
+git status                              # what changed
+git add .                              # stage changes
+git commit -m "..."                    # commit changes
+git push                               # send to your fork
+git pull --rebase                      # update your local branch
+git log --oneline -10                  # recent history
 ```
+
+If you use your own development branch:
+
+```sh id="f4z8kn"
+git checkout -b feature/my-change
+git push -u origin feature/my-change
+```
+
+## Before you submit
+
+```text id="g8w6pe"
+[ ] Working Recovery Manager
+[ ] Working in my own GitHub fork
+[ ] Required code commits completed during the authorised build phase
+[ ] README.md complete
+[ ] RULES.md reviewed
+[ ] ARCHITECTURE.md complete
+[ ] Evaluation completed
+[ ] Claim precision / relevant metrics documented
+[ ] Failure modes documented
+[ ] Demo ready
+[ ] Deployment URL verified, if applicable
+[ ] LinkedIn post published
+[ ] CodeQuesters tagged
+[ ] Sydon.AI tagged
+[ ] Submission links verified
+[ ] Final submission ready before 1 October 2026 · 6:00 PM IST
+```
+
+**Cube Buildathon · 05 · Recovery Manager**

@@ -1,42 +1,43 @@
-# CUBE Buildathon 2026 · 05 · Recovery Manager
+# Cube Buildathon · 05 · Recovery Manager
 
-**Commerce Context stream · Sydon Symphony sandbox · Two-week build**
+**Commerce Context stream · Round 2 · Individual Build**
 
 > Five agents, one unit, one record that follows it.
-> A physical product arrives, gets prepped, gets shipped, comes back. At every step a person makes a fast judgment that nobody records. Your pod builds the agent that makes one of those judgments, and leaves proof.
+> A physical product arrives, gets prepped, gets shipped, comes back. At every step a person makes a fast judgment that nobody records. **You build the agent that makes one of those judgments, and leaves proof.**
 
 **New here? Read these first:**
-1. [`GITHUB-GUIDE.md`](GITHUB-GUIDE.md) explains how to create your branch, where to put your work and how to open a PR.
-2. [`RULES.md`](RULES.md) covers the repository rules (enforced) and the five engineering rules (assessed).
+
+1. [`GITHUB-GUIDE.md`](GITHUB-GUIDE.md) explains how to fork the repository, set it up, build and push your work.
+2. [`RULES.md`](RULES.md) covers the repository and engineering rules.
 
 ---
 
 ## Your problem statement: Recovery Manager
 
-| | |
-|---|---|
-| **Position in the chain** | Step 5 of 5. Money back. This step has no camera. |
-| **Customer** | Anyone being charged fees they do not owe |
-| **What gets recorded** | Claim filed |
+|                              |                                                          |
+| ---------------------------- | -------------------------------------------------------- |
+| **Position in the chain**    | Step 5 of 5. Money back. This step has no camera.        |
+| **Customer**                 | Anyone being charged fees they do not owe                |
+| **What gets recorded**       | Claim filed                                              |
 | **Who consumes your output** | The seller, and whoever reviews the claim at the channel |
 
 Amazon charges inbound defect fees, loses units, damages inventory and mis-weighs parcels. Sellers are owed reimbursements they never claim, and charged fees they cannot contest, because contesting requires evidence and they have none. Today this is done by hand, by agencies taking a percentage, or not at all.
 
 **This is not a vision agent.** No camera, no capture surface. It reads the evidence records the other four Managers produce, matches them against channel fee and reimbursement reports, and assembles a claim.
 
-- Ingest a fee or reimbursement report and parse the charges
-- Match each charge to the unit evidence covering it
-- Decide whether the evidence contradicts the charge, supports it, or is silent
-- Assemble a disputable claim with evidence attached and a dollar figure
-- State explicitly what it cannot claim, and why
+* Ingest a fee or reimbursement report and parse the charges
+* Match each charge to the unit evidence covering it
+* Decide whether the evidence contradicts the charge, supports it, or is insufficient
+* Assemble a disputable claim with evidence attached and a dollar figure
+* State explicitly what it cannot claim, and why
 
-> **You cannot build in isolation.** You depend on four other pods holding their contract. Go and negotiate the evidence record shape in week one, then hold everyone to it. If a Manager changes their output on day nine, you find out on day nine.
+> **Build against the official evidence contract.** Recovery depends on the evidence produced by the other four Managers. For Round 2, use the evidence contract provided by the organisers as the baseline rather than creating a separate cross-pod contract.
 
 > **Your eval is different.** Others measure a model against human labels on units. You measure claim correctness on charges, and you report precision, because a wrongly filed claim costs a seller standing with the channel while a missed one costs only money.
 
 ### The chain you are part of
 
-```
+```text
  Supplier delivery      Inbound to Amazon     Outbound to buyer     Customer return        Money back
  ┌──────────────┐      ┌──────────────┐      ┌──────────────┐      ┌──────────────┐      ┌──────────────┐
  │ 01 Receiving │ ───▶ │ 02 Prep      │ ───▶ │ 03 Pack      │ ───▶ │ 04 Returns   │      │ 05 Recovery  │
@@ -60,72 +61,261 @@ Your output has to be usable by another pod. That's deliberate, and it's scored.
 
 All five buildathon repos share the same `unit_id` values (`UNIT-0001` … `UNIT-0100`). You can follow one unit from receiving through recovery, the same way the real records will be joined. In the sample, each unit takes one route: **FBA** (prep, then Amazon ships it and charges fees) or **merchant-fulfilled / 3PL** (the seller packs it). So a unit has a Prep record or a Pack record, never both.
 
-Recovery also gets `data/upstream/`, a copy of the other four files, so you can practise the join before the cross-pod contract exists.
+Recovery also gets `data/upstream/`, a copy of the other four files, so you can practise the join before Round 3 integration.
 
 ---
 
 ## How this works
 
-**You will not be handed a spec.** Real products are built backwards from the customer and forwards through the evidence. You write what the customer would say before you write code. You write the press release as if it already shipped. You write down the number that would make you stop. Then you build, and then you measure whether any of it was true.
+You have a defined problem statement, supporting domain information and an engineering repository to build from. Understand the customer and operational workflow before writing code, then build and measure whether the solution works.
 
-Every one of those documents exists to be proven wrong cheaply. A wrong assumption caught in a paragraph costs an hour. The same assumption caught in code costs a week. You are assessed on that as much as on running software.
+Your goal is to turn the Recovery Manager problem into a working, measurable agent.
 
 ### What you're given
-- This problem statement
-- A domain brief covering the real economics, fee structures and what a working day in a warehouse looks like *(shared by the organisers)*
-- The engineering rules in [`RULES.md`](RULES.md)
-- Sandbox access and a shared catalogue
-- One fully worked package for Returns Manager (customer letter, PR/FAQ, one-pager) as a reference for the standard expected. **Read it. Don't copy it.**
 
-### What you produce, in `submissions/<your-github-username>/`
-- A customer letter in your customer's voice
-- A PR/FAQ, including the questions you'd rather not answer
-- A one-pager with a metrics table and a **kill condition**
-- A `CLAUDE.md` and a build brief
-- A build log you keep current
-- An eval report with numbers and named failure modes
-- A working agent
+* This problem statement
+* A domain brief covering the real economics, fee structures and what a working day in a warehouse looks like *(shared by the organisers)*
+* The engineering rules in [`RULES.md`](RULES.md)
+* Repository data and supporting resources
+* One fully worked package for Returns Manager (customer letter, PR/FAQ, one-pager) as a reference for the standard expected. **Read it. Don't copy it.**
 
-## The build sequence: six faces, in order
+### What you produce
 
-Each face has a deliverable. Don't skip forward.
+Build your solution in **your own GitHub fork**.
 
-| Face | Deliverable | The point |
-|---|---|---|
-| **1 · Outcome first** | Customer letter, PR/FAQ, one-pager. **No code.** | Write it honestly enough that it might argue against your own agent. Include at least one kill condition. |
-| **2 · Context** | `CLAUDE.md` | Durable constraints, hard rules, where things live, and language you are not allowed to use. |
-| **3 · Tools** | A working agent, headless first | Get it running against fixture images from a CLI before any UI. |
-| **4 · Evals & guardrails** | A measured number, with its method | 50 unseen units. Two humans label each one independently, and you measure them against each other first. Report per check, with FP and FN separately. |
-| **5 · Decision tracing** | The evidence record | Photos, timestamp, operator, every check and verdict, model version, overrides with reasons, and a content hash. Build it for a customer to read. |
-| **6 · Agent comms** | Your output, consumed by another pod | Agree the cross-pod contract in week one, then hold it. |
+Your final Round 2 submission should include:
 
-## Two weeks
+* A working Recovery Manager
+* A `README.md` explaining your solution, setup, assumptions and limitations
+* An `ARCHITECTURE.md`
+* An eval report/results with numbers and named failure modes
+* A working demo/video
+* A deployment URL, where applicable
+* Your mandatory LinkedIn post URL
 
-| Days | Work | Gate to move on |
-|---|---|---|
-| 1–2 | Customer letter, PR/FAQ, one-pager, CLAUDE.md. No code. | Another pod reads your one-pager and states your kill condition back to you |
-| 3–4 | Schema and tenancy isolation. Headless agent, batched call, structured output. | Isolation test green. Agent runs on fixtures from a CLI. |
-| 5–7 | Capture surface, decision screen, override capture. | Works on a real phone, on cellular, not office wifi |
-| 8–10 | Evidence record page. Cross-pod contract. Fail-open behaviour. | Another pod's agent can read your records |
-| 11–13 | Eval set, two human labellers, measurement. Fix what it surfaces. | A number per check, with failure modes written down |
-| 14 | Present | — |
+## Build and submission flow
 
-## Day 14: what you present (five minutes, in this order)
+```text
+Understand
+    ↓
+Build
+    ↓
+Test
+    ↓
+Evaluate
+    ↓
+Document
+    ↓
+Demo / Deploy
+    ↓
+Submit
+```
 
-1. **The customer.** Who they are and what their day looks like (30 seconds).
-2. **What you measured.** Accuracy per check, false positives and negatives, failure modes.
-3. **The record,** as a customer would see it.
-4. **One unit, live, end to end.** If it fails live, explain why.
-5. **Your kill condition,** and whether your evidence tripped it.
+Round 2 is an **individual build**.
 
-> A pod reporting an honest 61% that knows exactly why will score above a pod reporting 95% it cannot break down.
+The official build phase begins on **25 September 2026 at 9:00 AM IST**.
 
-## What we're being straight with you about
+Submissions open from **27 September 2026**.
 
-- **The core assumption is untested.** Nobody knows yet whether vision models can identify products and grade condition on long-tail catalogues without per-SKU training. Finding out that it doesn't hold, and documenting that clearly, counts as a successful outcome.
-- **Nobody has spoken to a customer yet.** If you can get a real prep center or seller on a call, ask them to rank the five problems by urgency. Don't ask whether they'd buy what you're building.
-- **The background documents disagree in places.** A contradiction is a finding. Raise it as an Issue labelled `finding`.
+The final submission deadline is **1 October 2026 at 6:00 PM IST**.
+
+The submission form closes permanently at the deadline. **There is no resubmission.**
+
+All code commits forming your Round 2 submission must be made during the authorised build phase. Do not continue making Round 2 code changes after the build phase ends.
 
 ---
 
-*CUBE Buildathon · Commerce Context stream · Sydon Symphony sandbox*
+## Evaluation
+
+Recovery Manager is evaluated differently from the vision-based Managers.
+
+The primary question is:
+
+> **When Recovery Manager recommends a claim, is that claim actually supported by the available evidence?**
+
+Your evaluation should focus on:
+
+* charge/report parsing,
+* charge-to-unit matching,
+* upstream evidence matching,
+* evidence interpretation,
+* claim correctness,
+* claim precision,
+* uncertainty/review handling,
+* false claims and missed recoverable claims,
+* important failure modes.
+
+Report the methodology clearly.
+
+### Primary metric
+
+```text
+Claim Precision
+=
+Correctly Supported Claims
+--------------------------
+All Claims Recommended
+```
+
+Where measurable, also report:
+
+* total charges evaluated,
+* claims recommended,
+* correctly supported claims,
+* incorrectly recommended claims,
+* missed recoverable claims,
+* `UNCERTAIN` / review rate,
+* latency/cost where relevant.
+
+---
+
+## Round 2 Evaluation — 100 Points
+
+| Criterion                                    |  Points |
+| -------------------------------------------- | ------: |
+| Problem Understanding & Solution Relevance   |  **15** |
+| Agent Functionality & Decision Quality       |  **25** |
+| Evaluation, Accuracy & Uncertainty Handling  |  **25** |
+| Evidence, Traceability & Engineering Quality |  **20** |
+| UX, Demo & Documentation                     |  **15** |
+| **TOTAL**                                    | **100** |
+
+For Recovery Manager, the evaluation focus is on **claim correctness and evidence quality**, not image-level accuracy.
+
+---
+
+## Evidence and decision traceability
+
+Your Recovery Manager should make the claim traceable to the evidence that supports it.
+
+At minimum, the workflow should make it possible to understand:
+
+```text
+Charge
+   ↓
+Unit
+   ↓
+Upstream Evidence
+   ↓
+Evidence Interpretation
+   ↓
+Claim Decision
+   ↓
+Supporting Evidence
+```
+
+Use the official evidence contract provided by the organisers as the baseline for interoperability.
+
+Do not create a separate negotiated evidence schema for Round 2.
+
+---
+
+## PASS · FAIL · UNCERTAIN
+
+For upstream checks and evidence states:
+
+* **PASS** — the evidence supports the condition.
+* **FAIL** — the evidence shows the condition is not met.
+* **UNCERTAIN** — the evidence is insufficient for a reliable judgment.
+
+`UNCERTAIN` is not simply a low-confidence PASS.
+
+For Recovery, missing, contradictory or insufficient evidence should lead to an appropriate review/uncertain outcome rather than an unsupported claim.
+
+---
+
+## Engineering expectations
+
+* **Tenancy isolation:** If you store persistent data, keep organisation/client data properly isolated.
+* **Batch model calls:** Avoid unnecessary repeated model calls.
+* **Fail open:** A model or dependency failure should not silently discard incoming information. Preserve the available information and move the case into an appropriate pending/review state.
+* **Authoritative rules:** Where an external rule is required, use the authoritative source rather than relying on model memory or synthetic sample values.
+* **Evidence traceability:** Preserve the records used to support recovery decisions.
+
+---
+
+## What we're being straight with you about
+
+* **The core assumption is untested.** Nobody knows yet whether the evidence produced by automated upstream Managers will be reliable enough to support recovery claims at scale. Finding out that an assumption does not hold, and documenting that clearly, counts as a useful outcome.
+* **Nobody has spoken to a customer yet.** If you can get a real prep center or seller on a call, ask them to rank the five problems by urgency. Don't ask whether they'd buy what you're building.
+* **The background documents disagree in places.** A contradiction is a finding. Raise it as an Issue labelled `finding`.
+
+---
+
+## Submission
+
+### Submissions open
+
+**27 September 2026**
+
+### Final deadline
+
+**1 October 2026 · 6:00 PM IST**
+
+The submission form closes permanently at the deadline.
+
+**There is no reopening and no resubmission.**
+
+Your final submission should include:
+
+* your GitHub fork,
+* working Recovery Manager,
+* `README.md`,
+* `ARCHITECTURE.md`,
+* evaluation results,
+* demo video,
+* deployment URL where applicable,
+* LinkedIn post URL.
+
+### LinkedIn — Mandatory
+
+Publish a LinkedIn post about your Round 2 build.
+
+The post must:
+
+* mention your Recovery Manager build,
+* explain what you built,
+* tag **CodeQuesters**,
+* tag **Sydon.AI**.
+
+Include the LinkedIn post URL in the submission form.
+
+---
+
+## Commit rule
+
+All code commits forming your Round 2 submission must be made during the authorised build phase.
+
+Round 2 begins:
+
+**25 September 2026 · 9:00 AM IST**
+
+Once the build phase ends, do not continue making Round 2 code changes.
+
+---
+
+## Round 2 → Round 3
+
+Round 2 is about your **individual Recovery Manager**.
+
+Participants selected for Round 3 will work in five-person Pods combining:
+
+```text
+Receiving Manager
++
+Prep Manager
++
+Pack Manager
++
+Returns Manager
++
+Recovery Manager
+```
+
+The objective is to integrate the five specialised agents into one connected end-to-end commerce system.
+
+Your Round 2 implementation should therefore have clear outputs, structured evidence and an understandable interface for downstream integration.
+
+---
+
+*Cube Buildathon · Commerce Context*

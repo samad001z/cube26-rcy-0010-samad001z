@@ -271,6 +271,7 @@ def load_fee_report(path: Path) -> ChargeLoad:
                     quantity=int(row["quantity"]),
                     amount=Decimal(row["amount_usd"].strip()),
                     posted_date=row["posted_date"].strip(),
+                    defect_category=_clean(row.get("defect_category")),
                     source=SourceRef(file_sha256=file_hash, row=n, raw=dict(row)),
                 )
                 key = (charge.organization_id, charge.line_id)

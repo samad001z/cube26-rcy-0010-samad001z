@@ -1,0 +1,62 @@
+# Authoritative channel rules for Amazon US (CLAUDE.md rule 7).
+#
+# Every non-null `value` must come from the channel's own published documentation and carry:
+#   source_url     the page the value was read from
+#   retrieved_on   date the page was read (YYYY-MM-DD)
+#   retrieved_by   "human" (values are pasted by a person from the live page)
+#   excerpt        the verbatim text the value was read from
+# The loader (backend/app/core/rules.py) refuses a value without all four.
+#
+# A value nobody has retrieved stays null. The engine treats null as "not verified": the
+# check that needs it returns UNCERTAIN, never a guess. Values are never taken from model
+# memory or from the sample CSVs.
+#
+# `secondary_sources` may record third-party guides for context. They are notes only: the
+# loader never reads a value from them.
+channel: amazon_us
+
+filing_window_days:
+  inbound_defect_fee:
+    value: null
+    source_url: null
+    retrieved_on: null
+    retrieved_by: null
+    excerpt: null
+    secondary_sources: []
+  fulfilment_fee_weight_tier:
+    value: null
+    source_url: null
+    retrieved_on: null
+    retrieved_by: null
+    excerpt: null
+    secondary_sources: []
+  lost_inbound:
+    value: null
+    source_url: null
+    retrieved_on: null
+    retrieved_by: null
+    excerpt: null
+    secondary_sources: []
+  damaged_in_warehouse:
+    value: null
+    source_url: null
+    retrieved_on: null
+    retrieved_by: null
+    excerpt: null
+    secondary_sources: []
+  refund_issued_item_not_returned:
+    value: null
+    source_url: null
+    retrieved_on: null
+    retrieved_by: null
+    excerpt: null
+    secondary_sources: []
+
+# Fulfilment fee by size/weight tier. Needed to compute an overcharge on a weight-tier fee.
+fulfilment_fee_schedule:
+  value: null
+  source_url: null
+  retrieved_on: null
+  retrieved_by: null
+  excerpt: null
+  secondary_sources: []

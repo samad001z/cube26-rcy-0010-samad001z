@@ -1,0 +1,62 @@
+# Engine configuration: engineering choices made by this project, NOT channel rules.
+# Channel rules (fees, dispute windows) live only in config/rules/ with source URLs.
+# Every value here is ours and documented in docs/DECISIONS.md; none claims to be what the
+# channel publishes. Decimals are quoted strings so YAML never turns them into floats.
+
+# What a line's amount means (D-011).
+#   fee:        money the channel took. Recoverable = the overcharge.
+#   loss_event: a loss or refund event; amount = reimbursement already paid (0.00 = none).
+#               What is owed needs a unit value no upstream record provides, so these are
+#               never CLAIM (amount_computable = FAIL -> REVIEW).
+charge_types:
+  inbound_defect_fee:
+    kind: fee
+    pods:
+      prep: {window: before_posting, max_days_before: 120, match_keys: [fba_shipment_id]}
+    # Prep checks in scope when the line names no defect category ("prep/label scope").
+    scope_checks: [polybag_present_sealed, suffocation_warning, fnsku_label_placement,
+                   original_barcode_covered, expiry_date, handling_marks]
+  fulfilment_fee_weight_tier:
+    kind: fee
+    pods:
+      prep: {window: before_posting, max_days_before: 120, match_keys: [fba_shipment_id]}
+    # Evidence that can speak to a weight-tier fee. No upstream pod records these today.
+    required_checks: [measured_weight, measured_dimensions]
+  lost_inbound:
+    kind: loss_event
+    pods:
+      # A prep record on the same FBA shipment shows the unit was prepared for that shipment.
+      prep: {window: before_posting, max_days_before: 120, match_keys: [fba_shipment_id]}
+      # A later customer return of the same unit is inconsistent with "lost inbound".
+      returns: {window: after_posting, max_days_after: 180, match_keys: []}
+    # Receiving is deliberately not relevant: a supplier shortfall is not a channel loss.
+  damaged_in_warehouse:
+    kind: loss_event
+    pods:
+      prep: {window: before_posting, max_days_before: 120, match_keys: [fba_shipment_id]}
+  refund_issued_item_not_returned:
+    kind: loss_event
+    pods:
+      returns: {window: around_posting, max_days_before: 60, max_days_after: 60,
+                match_keys: [order_id]}
+
+# Inbound defect categories (optional `defect_category` column on the fee report) and the
+# prep checks that can show each category was NOT present. A category not listed here
+# cannot be covered by evidence and goes to REVIEW.
+inbound_defect_categories:
+  label: [fnsku_label_placement, original_barcode_covered]
+  polybag: [polybag_present_sealed]
+  suffocation_warning: [suffocation_warning]
+  expiry_date: [expiry_date]
+  handling_marks: [handling_marks]
+
+duplicate:
+  # Two fee lines with the same fingerprint posted this many days apart or less are
+  # treated as a duplicate; the earliest is canonical.
+  window_days: 30
+
+# Deterministic confidence (documented in ARCHITECTURE.md). Confidence is how strongly
+# the inputs determine a check's verdict. It is never produced by a model.
+confidence:
+  exact: "1.00"            # key comparison, date or Decimal arithmetic on ingested data
+  operator_check: "0.90"   # verdict read from a human operator's recorded check

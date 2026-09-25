@@ -6,6 +6,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
+from app.core.hashing import content_hash
 from app.core.money import to_money
 from app.models.vocab import ChargeType, ReportType
 
@@ -35,6 +36,9 @@ class Charge(BaseModel):
     amount: Decimal
     currency: str = "USD"
     posted_date: date
+    # Optional column, absent in the csv_v0 sample. For inbound defect fees it names the
+    # defect the channel charged for; without it evidence cannot cover the charge (D-013).
+    defect_category: str | None = None
     source: SourceRef
 
     @field_validator("amount", mode="before")
@@ -51,3 +55,7 @@ class Charge(BaseModel):
         if value < 1:
             raise ValueError("quantity must be >= 1")
         return value
+
+    def compute_hash(self) -> str:
+        """Content hash of the charge as ingested, so decisions can cite it."""
+        return content_hash(self.model_dump(mode="python"))

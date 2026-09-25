@@ -199,3 +199,14 @@ def test_config_yaml_yes_no_keys_are_strings():
     for pod in cfg["pods"].values():
         for spec in pod["enum_checks"]:
             assert all(isinstance(k, str) for k in spec["map"])
+
+
+def test_optional_defect_category_column(tmp_path, fees):
+    # Absent in the sample: every charge has None.
+    assert all(c.defect_category is None for c in fees.charges)
+    src = (DATA / "fee_report_sample.csv").read_text().splitlines()
+    rows = [src[0] + ",defect_category", src[9] + ",label", src[10] + ","]
+    p = tmp_path / "fees.csv"
+    p.write_text("\n".join(rows) + "\n")
+    res = load_fee_report(p)
+    assert [c.defect_category for c in res.charges] == ["label", None]

@@ -1,0 +1,8 @@
+# eval/ is a folder of scripts next to backend/; same rules as the backend.
+extend = "../backend/pyproject.toml"
+
+[lint.isort]
+known-first-party = ["app", "common", "make_sheet", "metrics", "run_eval"]
+
+[lint.per-file-ignores]
+"tests/**" = ["S105", "S106", "S603", "S607"]

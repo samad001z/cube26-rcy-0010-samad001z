@@ -1,0 +1,13 @@
+record_id,unit_id,org_id,order_id,ordered_sku,ordered_asin,identity_match,parts_list,parts_missing,observed_state,amazon_condition,operator_disposition,photo_refs,operator_id,captured_at
+E-RTN-138,EUNIT-138,org_demo_alpha,ORD-EVAL-13800,SKU-EV-GLASSES,B0EVAL106,yes,glass x4;gift box,,opened_unused,,restock,eval/returns/EUNIT-138_1.jpg;eval/returns/EUNIT-138_2.jpg,op_sofia,2026-07-17T13:00:00Z
+E-RTN-215,EUNIT-215,org_demo_bravo,ORD-EVAL-21545,SKU-EV-GLASSES,B0EVAL106,yes,glass x4;gift box,,damaged,,dispose,eval/returns/EUNIT-215_1.jpg;eval/returns/EUNIT-215_2.jpg,op_lina,2026-07-12T09:00:00Z
+E-RTN-220,EUNIT-220,org_demo_bravo,ORD-EVAL-22078,SKU-EV-BOTTLE,B0EVAL109,no,bottle;lid,,opened_unused,,liquidate,eval/returns/EUNIT-220_1.jpg;eval/returns/EUNIT-220_2.jpg,op_raj,2026-07-09T14:00:00Z
+E-RTN-230-1,EUNIT-230,org_demo_bravo,ORD-EVAL-23051,SKU-EV-TEE,B0EVAL102,yes,shirt,,opened_unused,,restock,eval/returns/EUNIT-230_1.jpg;eval/returns/EUNIT-230_2.jpg,op_ava,2026-07-13T09:00:00Z
+E-RTN-230-2,EUNIT-230,org_demo_bravo,ORD-EVAL-23051,SKU-EV-TEE,B0EVAL102,no,shirt,,opened_unused,,liquidate,eval/returns/EUNIT-230_1.jpg;eval/returns/EUNIT-230_2.jpg,op_ava,2026-07-14T10:00:00Z
+E-RTN-365,EUNIT-365,org_demo_alpha,ORD-EVAL-36567,SKU-EV-VITC,B0EVAL103,yes,jar;lid seal,,uncertain,,pending_review,eval/returns/EUNIT-365_1.jpg;eval/returns/EUNIT-365_2.jpg,op_tom,2026-07-22T15:00:00Z
+E-RTN-534,EUNIT-534,org_demo_alpha,ORD-EVAL-53455,SKU-EV-KETTLE,B0EVAL105,yes,kettle;base;manual,base,opened_unused,,refurbish,eval/returns/EUNIT-534_1.jpg;eval/returns/EUNIT-534_2.jpg,op_sofia,2026-07-20T11:00:00Z
+E-RTN-537,EUNIT-537,org_demo_alpha,ORD-EVAL-53776,SKU-EV-HEADPH,B0EVAL107,yes,headphones;cable;case,,opened_unused,,restock,eval/returns/EUNIT-537_1.jpg;eval/returns/EUNIT-537_2.jpg,op_lina,2026-07-18T10:00:00Z
+E-RTN-720,EUNIT-720,org_demo_bravo,ORD-EVAL-72020,SKU-EV-SUNSCR,B0EVAL104,yes,tube;cap,,signs_of_use,,liquidate,eval/returns/EUNIT-720_1.jpg;eval/returns/EUNIT-720_2.jpg,op_lina,2026-07-11T08:30:00Z
+E-RTN-726,EUNIT-726,org_demo_alpha,ORD-EVAL-72630,SKU-EV-PLANTER,B0EVAL108,yes,planter;saucer,,factory_sealed,,restock,eval/returns/EUNIT-726_1.jpg;eval/returns/EUNIT-726_2.jpg,op_tom,2026-09-10T10:30:00Z
+E-RTN-752,EUNIT-752,org_demo_bravo,ORD-EVAL-75287,SKU-EV-BOTTLE,B0EVAL109,yes,bottle;lid,,opened_unused,,restock,eval/returns/EUNIT-752_1.jpg;eval/returns/EUNIT-752_2.jpg,op_raj,2026-09-05T15:20:00Z
+E-RTN-806,EUNIT-806,org_demo_bravo,ORD-EVAL-80649,SKU-EV-KETTLE,B0EVAL105,uncertain,kettle;base;manual,,opened_unused,,refurbish,eval/returns/EUNIT-806_1.jpg;eval/returns/EUNIT-806_2.jpg,op_ava,2026-07-16T12:00:00Z

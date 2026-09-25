@@ -1,0 +1,3 @@
+record_id,unit_id,org_id,order_id,channel,order_lines,observed_in_box,operator_verdict,photo_refs,operator_id,captured_at
+E-PCK-129,EUNIT-129,org_demo_bravo,ORD-EVAL-SH129,shopify,SKU-EV-TEE:1,SKU-EV-TEE:1,seal,eval/pack/EUNIT-129_open_box.jpg,op_sofia,2026-08-02T10:00:00Z
+E-PCK-424,EUNIT-424,org_demo_alpha,ORD-EVAL-SH424,shopify,SKU-EV-BOTTLE:1,SKU-EV-BOTTLE:1,seal,eval/pack/EUNIT-424_open_box.jpg,op_ken,2026-08-02T10:00:00Z

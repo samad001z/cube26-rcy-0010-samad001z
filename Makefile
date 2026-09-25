@@ -6,7 +6,7 @@ export TEST_MIGRATION_DATABASE_URL ?= postgresql+psycopg://alibi_owner:local_dev
 export ATTACHMENT_KEY_SECRET ?= local-dev-attachment-secret
 export LLM_ENABLED ?= false
 
-.PHONY: install db-up db-down migrate lint fmt test dev run
+.PHONY: install db-up db-down migrate lint fmt test dev run sheet eval
 
 install:
 	cd backend && uv sync
@@ -22,12 +22,17 @@ migrate:
 
 lint:
 	cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app tests
+	cd backend && uv run ruff check ../eval && uv run ruff format --check ../eval
+	cd eval && MYPYPATH=../backend uv run --project ../backend mypy \
+		--config-file ../backend/pyproject.toml --explicit-package-bases *.py tests
 
 fmt:
 	cd backend && uv run ruff check --fix . && uv run ruff format .
+	cd backend && uv run ruff check --fix ../eval && uv run ruff format ../eval
 
 test:
 	cd backend && uv run pytest
+	cd backend && uv run pytest ../eval/tests
 
 dev:
 	cd backend && uv run uvicorn app.main:app --reload
@@ -37,3 +42,7 @@ ORG ?= org_demo_alpha
 run:
 	cd backend && uv run alibi run --report ../data/fee_report_sample.csv \
 		--upstream ../data/upstream/ --org $(ORG) $(if $(AS_OF),--as-of $(AS_OF),)
+
+# Held-out eval (eval/README.md). `sheet` rebuilds the labelling sheet from eval/data.
+sheet:
+	cd backend && uv run python ../eval/make_sheet.py

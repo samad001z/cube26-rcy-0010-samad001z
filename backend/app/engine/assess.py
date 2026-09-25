@@ -1,10 +1,13 @@
 """Evidence assessment per charge type: what the usable upstream records say about the
 charge. Pure; no decisions here (engine/__init__.py maps an assessment to a decision).
 
-Polarity is always relative to the channel's position on the line:
-  contradicts  the evidence is against the channel's position (favours recovery)
-  supports     the evidence is for the channel's position
+Polarity is always relative to what the line asserts (D-016):
+  contradicts  the evidence says the line is wrong
+  supports     the evidence is consistent with the line
   uncertain    the evidence cannot settle it (UNCERTAIN verdict, pending record, ...)
+For a fee, "the line is wrong" favours recovery. For a loss event (lost, damaged, refunded
+and not returned) the line is what the seller would be reimbursed for, so "supports"
+favours recovery and "contradicts" makes the loss doubtful. The engine maps each case.
 """
 
 from collections import defaultdict
@@ -41,6 +44,8 @@ class Assessment:
     # Share of the charged units the decisive evidence covers (CONTRADICTED only).
     coverage: Decimal | None = None
     scope_note: str | None = None
+    # Loss events: the row of config loss_event_outcomes this evidence maps to (D-016).
+    outcome: str | None = None
 
 
 def unit_coverage(charge: Charge, units_covered: int) -> Decimal:
@@ -165,6 +170,9 @@ def assess_weight_tier(
 def assess_lost_inbound(
     charge: Charge, usable: Sequence[EvidenceRecord], cfg: EngineConfig, rules: ChannelRules
 ) -> Assessment:
+    """The line asserts the unit was lost inbound. Prep on the shipment is consistent with it
+    (supports); a final record of the unit after the loss (a customer return) says the line
+    is wrong (contradicts), whatever prep shows."""
     findings: list[Finding] = []
     for r in usable:
         if r.agent == "prep":
@@ -172,7 +180,7 @@ def assess_lost_inbound(
                 Finding(
                     r,
                     (),
-                    "uncertain" if _pending(r) else "contradicts",
+                    "uncertain" if _pending(r) else "supports",
                     f"{r.record_id}: unit prepared for {r.subject.fba_shipment_id} before the "
                     "loss was posted",
                 )
@@ -182,16 +190,40 @@ def assess_lost_inbound(
                 Finding(
                     r,
                     (),
-                    "uncertain" if _pending(r) else "supports",
+                    "uncertain" if _pending(r) else "contradicts",
                     f"{r.record_id}: unit returned by a customer after the loss was posted",
                 )
             )
-    return _combine(findings, "no prep or later returns record for this unit")
+    if not findings:
+        return Assessment(
+            EvidenceStatus.INSUFFICIENT,
+            (),
+            "no prep or later returns record for this unit",
+            no_relevant=True,
+        )
+    pols = {f.polarity for f in findings}
+    fmt = "; ".join(f.detail for f in findings)
+    if "contradicts" in pols:
+        return Assessment(
+            EvidenceStatus.CONTRADICTED,
+            tuple(findings),
+            fmt,
+            coverage=ONE,
+            outcome="later_sighting",
+        )
+    if "uncertain" in pols:
+        return Assessment(EvidenceStatus.INSUFFICIENT, tuple(findings), fmt)
+    return Assessment(
+        EvidenceStatus.SUPPORTED, tuple(findings), fmt, outcome="shipped_no_later_sighting"
+    )
 
 
 def assess_damaged_in_warehouse(
     charge: Charge, usable: Sequence[EvidenceRecord], cfg: EngineConfig, rules: ChannelRules
 ) -> Assessment:
+    """The line asserts the unit was damaged in the warehouse. Prep recording the unit leave
+    with no failed check is consistent with it (supports); a failed prep check means it may
+    have arrived damaged, which cannot settle the line (uncertain)."""
     findings: list[Finding] = []
     for r in usable:
         fails = [c.check_key for c in r.checks if c.verdict == Verdict.FAIL]
@@ -203,17 +235,24 @@ def assess_damaged_in_warehouse(
                 Finding(
                     r,
                     tuple(sorted(c.check_key for c in r.checks)),
-                    "contradicts",
+                    "supports",
                     f"{r.record_id}: unit left prep with no failed check",
                 )
             )
-    return _combine(findings, "no prep record for this unit on this shipment")
+    return _combine(
+        findings, "no prep record for this unit on this shipment", supports="left_prep_undamaged"
+    )
 
 
 def assess_refund_not_returned(
     charge: Charge, usable: Sequence[EvidenceRecord], cfg: EngineConfig, rules: ChannelRules
 ) -> Assessment:
+    """The line asserts a refund was issued and the item was not returned. The ordered item
+    coming back says the line is wrong (contradicts); a different item coming back is
+    consistent with it (supports). The item counts as returned complete only when identity,
+    parts and condition all PASS; anything else is returned incomplete or damaged."""
     findings: list[Finding] = []
+    complete: list[bool] = []
     for r in usable:
         v = {c.check_key: c.verdict for c in r.checks}
         cond = _fmt(v)
@@ -230,18 +269,36 @@ def assess_refund_not_returned(
                 )
             )
         else:
+            whole = all(
+                v.get(k) == Verdict.PASS for k in ("parts_complete", "returned_item_condition")
+            )
+            complete.append(whole)
+            state = "complete" if whole else "incomplete, damaged or condition uncertain"
             findings.append(
                 Finding(
                     r,
                     tuple(sorted(v)),
                     "contradicts",
-                    f"{r.record_id}: the ordered item was returned ({cond})",
+                    f"{r.record_id}: the ordered item was returned, {state} ({cond})",
                 )
             )
-    return _combine(findings, "no returns record for this order")
+    return _combine(
+        findings,
+        "no returns record for this order",
+        contradicts="returned_complete" if all(complete) else "returned_incomplete_or_damaged",
+        supports="wrong_item_returned",
+    )
 
 
-def _combine(findings: list[Finding], none_text: str) -> Assessment:
+def _combine(
+    findings: list[Finding],
+    none_text: str,
+    *,
+    contradicts: str | None = None,
+    supports: str | None = None,
+) -> Assessment:
+    """Loss events: one polarity across all findings settles the line; the outcome labels
+    name the row of config loss_event_outcomes that applies."""
     if not findings:
         return Assessment(EvidenceStatus.INSUFFICIENT, (), none_text, no_relevant=True)
     pols = {f.polarity for f in findings}
@@ -249,9 +306,11 @@ def _combine(findings: list[Finding], none_text: str) -> Assessment:
     if {"contradicts", "supports"} <= pols:
         return Assessment(EvidenceStatus.CONFLICTING, tuple(findings), fmt)
     if pols == {"contradicts"}:
-        return Assessment(EvidenceStatus.CONTRADICTED, tuple(findings), fmt, coverage=ONE)
+        return Assessment(
+            EvidenceStatus.CONTRADICTED, tuple(findings), fmt, coverage=ONE, outcome=contradicts
+        )
     if pols == {"supports"}:
-        return Assessment(EvidenceStatus.SUPPORTED, tuple(findings), fmt)
+        return Assessment(EvidenceStatus.SUPPORTED, tuple(findings), fmt, outcome=supports)
     return Assessment(EvidenceStatus.INSUFFICIENT, tuple(findings), fmt)
 
 

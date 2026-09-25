@@ -135,6 +135,36 @@ class ConfidenceTable(_Strict):
         return d
 
 
+class LossOutcome(_Strict):
+    """One row of the per-charge-type loss-event mapping (D-016)."""
+
+    evidence_status: Literal["CONTRADICTED", "SUPPORTED"]
+    # A loss event is never CLAIM: what is owed needs a unit value (D-011).
+    decision: Literal["DO_NOT_CLAIM", "REVIEW"]
+    rule_id: str
+    reason: str
+    next_action: str | None = None
+    # True on the claim path: evidence supports the loss, REVIEW until an amount exists.
+    amount_needed: bool = False
+
+    @model_validator(mode="after")
+    def _consistent(self) -> Self:
+        if self.amount_needed and (
+            self.decision != "REVIEW" or self.evidence_status != "SUPPORTED"
+        ):
+            raise ValueError("amount_needed rows must be REVIEW with SUPPORTED evidence")
+        if self.decision == "REVIEW" and not self.amount_needed and not self.next_action:
+            raise ValueError(f"{self.rule_id}: a REVIEW row needs a next_action")
+        if self.decision == "DO_NOT_CLAIM" and self.next_action:
+            raise ValueError(f"{self.rule_id}: a DO_NOT_CLAIM row takes no next_action")
+        return self
+
+
+class LossEventMapping(_Strict):
+    outcomes: dict[str, LossOutcome]
+    no_evidence: str | None = None
+
+
 class DuplicateConfig(_Strict):
     window_days: int = Field(ge=0)
 
@@ -142,6 +172,7 @@ class DuplicateConfig(_Strict):
 class EngineConfig(_Strict):
     charge_types: dict[ChargeType, ChargeTypeConfig]
     inbound_defect_categories: dict[str, list[str]]
+    loss_event_outcomes: dict[ChargeType, LossEventMapping]
     duplicate: DuplicateConfig
     confidence: ConfidenceTable
     config_hash: str = ""
@@ -155,6 +186,16 @@ class EngineConfig(_Strict):
         if missing:
             raise ValueError(f"charge_types missing {sorted(missing)}")
         return v
+
+    @model_validator(mode="after")
+    def _loss_mapping_matches_kinds(self) -> Self:
+        loss = {ct for ct, c in self.charge_types.items() if c.kind == "loss_event"}
+        if set(self.loss_event_outcomes) != loss:
+            raise ValueError(
+                "loss_event_outcomes must list exactly the loss_event charge types "
+                f"{sorted(loss)}, got {sorted(self.loss_event_outcomes)}"
+            )
+        return self
 
 
 def _read(path: Path) -> dict[str, Any]:

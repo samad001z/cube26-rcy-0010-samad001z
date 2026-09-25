@@ -7,7 +7,7 @@
 #   fee:        money the channel took. Recoverable = the overcharge.
 #   loss_event: a loss or refund event; amount = reimbursement already paid (0.00 = none).
 #               What is owed needs a unit value no upstream record provides, so these are
-#               never CLAIM (amount_computable = FAIL -> REVIEW).
+#               never CLAIM. The decision per evidence outcome is in loss_event_outcomes.
 charge_types:
   inbound_defect_fee:
     kind: fee
@@ -56,6 +56,71 @@ inbound_defect_categories:
   suffocation_warning: [suffocation_warning]
   expiry_date: [expiry_date]
   handling_marks: [handling_marks]
+
+# Loss events: decision per charge type and evidence outcome (D-016). evidence_status is
+# always relative to what the line asserts: CONTRADICTED = "the evidence says the line is
+# wrong". For a fee that means recover; for a loss event it means the loss the seller would
+# be reimbursed for is doubtful or did not happen, so it is never a claim.
+# Outcomes are set by app/engine/assess.py. Rows with amount_needed: true are the claim
+# path: the evidence supports the loss but no amount can be computed (D-011), so they are
+# REVIEW until an authoritative unit value exists. Only those rows may suggest an override
+# with an amount. INSUFFICIENT and CONFLICTING evidence use the generic rules, not this table.
+# `no_evidence` is added to the reason when nothing speaks to the charge (R_NO_RELEVANT_EVIDENCE).
+loss_event_outcomes:
+  refund_issued_item_not_returned:
+    outcomes:
+      # Identity, parts and condition all PASS: the ordered item came back whole, so the seller
+      # has the item and nothing is owed for a non-return.
+      returned_complete:
+        evidence_status: CONTRADICTED
+        decision: DO_NOT_CLAIM
+        rule_id: R_ITEM_RETURNED
+        reason: "the ordered item was returned complete and in sellable condition, so nothing is owed for a non-return"
+      # Identity PASS but parts FAIL/not recorded, or condition FAIL/UNCERTAIN/not recorded:
+      # the item came back, but a returns claim for its condition or missing parts may exist.
+      returned_incomplete_or_damaged:
+        evidence_status: CONTRADICTED
+        decision: REVIEW
+        rule_id: R_RETURNED_INCOMPLETE_OR_DAMAGED
+        reason: "item returned; incomplete, damaged or condition uncertain; possible separate claim"
+        next_action: "The item came back, so do not claim a non-return. Check the photos and parts list; if the item is damaged or incomplete, decide on a separate returns claim within its own window."
+      # Identity FAIL: a different item came back, so the ordered item was not returned.
+      # Supports the seller's claim; REVIEW until an amount is computable.
+      wrong_item_returned:
+        evidence_status: SUPPORTED
+        decision: REVIEW
+        rule_id: R_AMOUNT_NOT_COMPUTABLE
+        amount_needed: true
+        reason: "a different item came back, so the ordered item was not returned"
+    no_evidence: "no return was recorded in the custody window; the absence is consistent with the seller's claim that the item was not returned, but it is not evidence"
+  lost_inbound:
+    outcomes:
+      # Prep shows the unit was prepared for this shipment and nothing saw it afterwards:
+      # consistent with the loss. REVIEW until an amount is computable.
+      shipped_no_later_sighting:
+        evidence_status: SUPPORTED
+        decision: REVIEW
+        rule_id: R_AMOUNT_NOT_COMPUTABLE
+        amount_needed: true
+        reason: "the unit was prepared for this shipment and no later record shows it, consistent with the loss"
+      # A final record shows the unit after the loss was posted (e.g. a customer return):
+      # the loss is doubtful. Never a claim.
+      later_sighting:
+        evidence_status: CONTRADICTED
+        decision: REVIEW
+        rule_id: R_LOSS_DOUBTFUL
+        reason: "the unit was seen after the loss was posted, so the loss is doubtful"
+        next_action: "Do not claim this loss. Check whether the channel found or reconciled the unit; claim only if the later record is shown to be a different unit."
+  damaged_in_warehouse:
+    outcomes:
+      # Prep recorded the unit leaving with no failed check: it was undamaged before the
+      # warehouse, consistent with warehouse damage. REVIEW until an amount is computable.
+      left_prep_undamaged:
+        evidence_status: SUPPORTED
+        decision: REVIEW
+        rule_id: R_AMOUNT_NOT_COMPUTABLE
+        amount_needed: true
+        reason: "the unit left prep with no failed check, consistent with damage in the warehouse"
 
 duplicate:
   # Two fee lines with the same fingerprint posted this many days apart or less are

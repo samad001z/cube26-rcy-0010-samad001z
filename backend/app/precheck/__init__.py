@@ -42,6 +42,12 @@ class FilingWindow:
     deadline: date | None
     source_url: str | None
     detail: str
+    # The event the sourced window counts from; the posted date stands in for it.
+    anchor: str | None = None
+
+    @property
+    def proxy_note(self) -> str:
+        return f"computed from the posted date as a proxy for the {self.anchor or 'event date'}"
 
 
 @dataclass(frozen=True)
@@ -178,6 +184,7 @@ def filing_window(charge: Charge, rules: ChannelRules, as_of: date) -> FilingWin
                 rule.source_url,
                 f"{NOT_YET_ELIGIBLE}: posted {posted} + {rule.window_open_days} days = window "
                 f"opens {opens}; as of {as_of} a claim cannot be filed yet {source}",
+                rule.anchor,
             )
         opened = f"window opened {opens} (posted {posted} + {rule.window_open_days} days); "
     else:
@@ -191,6 +198,7 @@ def filing_window(charge: Charge, rules: ChannelRules, as_of: date) -> FilingWin
             rule.source_url,
             f"{opened}{FILING_NOT_VERIFIED}: no sourced filing deadline for "
             f"{charge.charge_type.value} in config/rules/",
+            rule.anchor,
         )
     deadline = posted + timedelta(days=rule.window_close_days)
     passed = as_of > deadline
@@ -202,6 +210,7 @@ def filing_window(charge: Charge, rules: ChannelRules, as_of: date) -> FilingWin
         rule.source_url,
         f"{opened}posted {posted} + {rule.window_close_days} days = deadline {deadline}; "
         f"as of {as_of} the window is {'passed' if passed else 'open'} {source}",
+        rule.anchor,
     )
 
 

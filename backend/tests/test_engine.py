@@ -94,7 +94,7 @@ def test_every_decision_has_all_checks_with_verdict_and_confidence_and_a_valid_h
     assert {c.check_key for c in d.checks} == HANDBOOK_CHECKS
     assert all(c.confidence is not None for c in d.checks)
     assert d.verify_hash()
-    assert d.outcome.decided_by == DECIDED_BY == "rules@0.2.0"
+    assert d.outcome.decided_by == DECIDED_BY == "rules@0.3.0"
     assert d.outcome.decision == d.decision.value
     assert d.status == RecordStatus.FINAL
     assert d.model_version is None
@@ -480,13 +480,16 @@ def test_damaged_prep_with_failed_check_is_insufficient():
 
 
 def test_loss_event_past_known_deadline_is_do_not_claim_with_proxy_note():
-    rules = rules_with_window(60, "damaged_in_warehouse")
+    # Shipped rules: damaged_in_warehouse closes 60 days after the reported date (D-017).
     c = charge(charge_type=ChargeType.DAMAGED_IN_WAREHOUSE, amount="14.00")  # posted 07-18
-    d = run(c, [prep_all_pass()], rules=rules)  # as of 09-25: deadline 09-16 passed
+    d = run(c, [prep_all_pass()])  # as of 09-25: deadline 09-16 passed
     assert d.decision == Decision.DO_NOT_CLAIM
     assert d.reason_code == ReasonCode.FILING_WINDOW_EXPIRED
     assert d.rule_id == "R_FILING_WINDOW_PASSED"
-    assert "proxy for the event date" in d.reason
+    assert (
+        "computed from the posted date as a proxy for the date the item was reported lost or "
+        "damaged" in d.reason
+    )
     assert d.evidence_status == EvidenceStatus.SUPPORTED  # evidence checks kept
     assert _verdicts(d)["evidence_contradicts_charge"] == Verdict.FAIL
     assert d.citations and d.claim is None
@@ -658,7 +661,10 @@ def test_overridden_prep_record_cannot_contradict():
 
 # --- filing window with an open day (D-017) ---------------------------------------------
 
-REFUND_WINDOW = rules_with_window(120, "refund_issued_item_not_returned", open_days=60)
+# The shipped refund window (D-017): opens 60 and closes 120 days after the refund date.
+REFUND_WINDOW = RULES
+_refund_rule = RULES.filing_windows[ChargeType.REFUND_ISSUED_ITEM_NOT_RETURNED]
+assert (_refund_rule.window_open_days, _refund_rule.window_close_days) == (60, 120)
 # _refund_line() is posted 2026-06-24: the window opens 2026-08-23 and closes 2026-10-22.
 
 
@@ -669,6 +675,7 @@ def test_before_window_opens_a_would_be_do_not_claim_is_review_not_open():
     c = d.check("within_filing_window")
     assert c.verdict == Verdict.FAIL and "not yet eligible" in (c.detail or "")
     assert d.next_action is not None and "2026-08-23" in d.next_action
+    assert "as a proxy for the customer refund or replacement date" in d.reason
     assert d.evidence_status == EvidenceStatus.CONTRADICTED  # evidence still assessed
 
 
@@ -697,7 +704,7 @@ def test_after_window_closes_is_do_not_claim_expired():
     d = run(_refund_line(), [_returns(parts="FAIL")], rules=REFUND_WINDOW, as_of=date(2026, 10, 23))
     assert d.decision == Decision.DO_NOT_CLAIM and d.rule_id == "R_FILING_WINDOW_PASSED"
     assert d.reason_code == ReasonCode.FILING_WINDOW_EXPIRED
-    assert "proxy for the event date" in d.reason
+    assert "as a proxy for the customer refund or replacement date" in d.reason
     assert d.check("within_filing_window").verdict == Verdict.FAIL
 
 

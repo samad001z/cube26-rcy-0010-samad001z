@@ -59,7 +59,7 @@ from app.precheck import FILING_NOT_VERIFIED, Precheck, is_fee_refund_line
 from app.resolution import Resolution
 from app.retrieval import Candidate
 
-ENGINE_VERSION = "0.2.0"
+ENGINE_VERSION = "0.3.0"
 DECIDED_BY = f"rules@{ENGINE_VERSION}"
 ZERO = Decimal("0.00")
 
@@ -238,8 +238,7 @@ def _fire(
             ReasonCode.FILING_WINDOW_NOT_OPEN,
             "within_filing_window",
             "the filing window has not opened yet, so this can be neither claimed nor "
-            "dismissed (computed from the posted date as a proxy for the event date): "
-            f"{pre.filing.detail}.",
+            f"dismissed ({pre.filing.proxy_note}): {pre.filing.detail}.",
             f"Re-run on or after {pre.filing.opens}, when the filing window opens.",
         )
     if is_fee_refund_line(charge, cfg):
@@ -422,8 +421,7 @@ def _fire_loss_event(pre: Precheck, a: Assessment, loss: LossEventMapping) -> Fi
             ReasonCode.FILING_WINDOW_EXPIRED,
             "within_filing_window",
             f"evidence is {a.status.value} ({a.detail}); but the filing deadline has passed, "
-            f"computed from the posted date as a proxy for the event date: "
-            f"{pre.filing.detail}.",
+            f"{pre.filing.proxy_note}: {pre.filing.detail}.",
         )
     if a.status == EvidenceStatus.CONFLICTING:
         return Fired(

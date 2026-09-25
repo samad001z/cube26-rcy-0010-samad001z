@@ -14,10 +14,10 @@ Deadline: **1 October 2026, 18:00 IST**. No resubmission. All code commits must 
 
 - `decision`: `CLAIM` | `DO_NOT_CLAIM` | `REVIEW`
 - `evidence_status`: `CONTRADICTED` | `SUPPORTED` | `INSUFFICIENT` | `CONFLICTING`
-- Additional pre-check outcomes carried in `reason_code`: `DUPLICATE_CHARGE`, `ALREADY_REIMBURSED`, `UNRESOLVED_UNIT`, `NO_RELEVANT_EVIDENCE`, `EVIDENCE_OUTSIDE_WINDOW`, `MODEL_UNAVAILABLE`
+- Additional outcomes carried in `reason_code`: `DUPLICATE_CHARGE`, `ALREADY_REIMBURSED`, `UNRESOLVED_UNIT`, `NO_RELEVANT_EVIDENCE`, `EVIDENCE_OUTSIDE_WINDOW`, `FILING_WINDOW_EXPIRED`, `MODEL_UNAVAILABLE` (LLM failed), `DEPENDENCY_UNAVAILABLE` (database or other dependency failed), `ENGINE_ERROR` (the rule engine raised on a charge)
 - `status` of a decision record: `final` | `pending` (fail-open) | `overridden`
 
-Mapping: CONTRADICTED with full coverage -> CLAIM. SUPPORTED -> DO_NOT_CLAIM. INSUFFICIENT or CONFLICTING -> REVIEW. Duplicate charge -> CLAIM on the duplicate. Already fully reimbursed -> DO_NOT_CLAIM.
+Mapping: CONTRADICTED with full coverage -> CLAIM. SUPPORTED -> DO_NOT_CLAIM. INSUFFICIENT or CONFLICTING -> REVIEW. Duplicate charge -> CLAIM on the duplicate. Already fully reimbursed -> DO_NOT_CLAIM. Sourced filing deadline known and passed -> DO_NOT_CLAIM with `FILING_WINDOW_EXPIRED` (evidence checks still shown).
 
 ## Non-negotiable rules
 
@@ -25,7 +25,7 @@ Mapping: CONTRADICTED with full coverage -> CLAIM. SUPPORTED -> DO_NOT_CLAIM. IN
 2. **Deterministic rules decide.** Decisions come from `engine/`. The LLM may: parse unstructured input, classify free-text notes into a fixed enum with a verbatim quote, and write explanations from a decision trace. It never sets a decision, an amount or a citation.
 3. **Every LLM output is validated** (quotes are verbatim substrings, every ID and number in an explanation exists in the trace). On failure: discard and fall back.
 4. **Batch model calls.** At most one model call per charge covering all its classifications, never one call per field.
-5. **Fail open.** If a model or dependency fails, persist the input and evidence, set `status: pending`, `decision: REVIEW`, `reason_code: MODEL_UNAVAILABLE`. Never drop a charge.
+5. **Fail open.** If a model, a dependency or the engine fails, persist the input and evidence, set `status: pending`, `decision: REVIEW`, and `reason_code` to `MODEL_UNAVAILABLE` (LLM), `DEPENDENCY_UNAVAILABLE` (database or other dependency) or `ENGINE_ERROR` (engine exception). Never drop a charge.
 6. **REVIEW is a first-class outcome**, shown prominently. Never force a CLAIM.
 7. **Authoritative rules only.** Fee schedules, dispute windows and requirements come from the channel's published documentation, stored with source URL and retrieval date in `config/rules/`. Never from model memory. Never from the sample CSVs (their amounts and flags are synthetic).
 8. **Tenancy isolation.** Postgres row-level security enabled and FORCED on every table, scoped to `organization_id`. Test: `org_demo_bravo` reads zero rows of `org_demo_alpha`, and cannot fetch another org's record or attachment by guessing an ID. Attachment keys are non-guessable.

@@ -212,11 +212,17 @@ def test_known_open_window_claims_without_warning():
     assert "not verified" not in d.reason
 
 
-def test_passed_window_blocks_claim():
+def test_passed_window_is_do_not_claim_filing_window_expired_with_evidence_kept():
+    # D-015a (human lead, 2026-09-25): a known, passed deadline is DO_NOT_CLAIM, not REVIEW.
     d = run(charge(defect_category="label"), [prep_all_pass()], rules=rules_with_window(30))
-    assert d.decision == Decision.REVIEW and d.rule_id == "R_FILING_WINDOW_PASSED"
+    assert d.decision == Decision.DO_NOT_CLAIM and d.rule_id == "R_FILING_WINDOW_PASSED"
+    assert d.reason_code == ReasonCode.FILING_WINDOW_EXPIRED
     assert d.claim is None
+    assert d.check("within_filing_window").verdict == Verdict.FAIL
+    # the evidence checks still show that the evidence supports recovery
     assert d.evidence_status == EvidenceStatus.CONTRADICTED
+    assert d.check("evidence_contradicts_charge").verdict == Verdict.PASS
+    assert [c.role for c in d.citations] == ["contradicts"]
 
 
 # --- duplicates and reimbursements ----------------------------------------------------
@@ -234,11 +240,14 @@ def test_duplicate_is_claimed_citing_the_canonical_line():
     assert run(first, [], others=[dup]).reason_code != ReasonCode.DUPLICATE_CHARGE
 
 
-def test_duplicate_past_filing_window_is_review():
+def test_duplicate_past_filing_window_is_do_not_claim_filing_window_expired():
     first = charge("L-1", posted=date(2026, 7, 1))
     dup = charge("L-2", posted=date(2026, 7, 5))
     d = run(dup, [], others=[first], rules=rules_with_window(10))
-    assert d.decision == Decision.REVIEW and d.reason_code == ReasonCode.DUPLICATE_CHARGE
+    assert d.decision == Decision.DO_NOT_CLAIM
+    assert d.reason_code == ReasonCode.FILING_WINDOW_EXPIRED
+    assert d.check("not_duplicate").verdict == Verdict.FAIL
+    assert [(c.id, c.role) for c in d.citations] == [("L-1", "canonical_charge")]
 
 
 def test_fully_reimbursed_fee_is_do_not_claim():

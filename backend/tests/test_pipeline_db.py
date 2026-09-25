@@ -181,6 +181,7 @@ def test_engine_failure_on_one_charge_fails_open_and_keeps_every_charge(
     failed = by_line["SYN-1"]
     assert failed.decision == Decision.REVIEW and failed.status == RecordStatus.PENDING
     assert failed.rule_id == "R_ENGINE_ERROR" and "RuntimeError: boom" in failed.reason
+    assert failed.reason_code is not None and failed.reason_code.value == "ENGINE_ERROR"
     assert failed.verify_hash()
     assert by_line["SYN-2"].status == RecordStatus.FINAL
     with org_session(app_engine, org) as s:
@@ -324,9 +325,12 @@ def test_cli_rejects_a_bad_as_of_date(app_engine, loaded, monkeypatch):
 
 # --- regression snapshot --------------------------------------------------------------
 
-# Rule counts the current engine produces on the sample (2026-09-25). This is a regression
-# snapshot of engine behaviour, NOT ground truth: correctness is measured by the human-
-# labelled eval set (Day 3). Any change here must be explained and approved by the human.
+# REGRESSION CHECK ONLY. NOT GROUND TRUTH. EXCLUDED FROM EVAL METRICS.
+# These are the rule counts the engine produced on the synthetic sample CSVs on 2026-09-25,
+# approved by the human lead as a regression check. They say nothing about whether the
+# decisions are right: correctness is measured only by the held-out, human-labelled eval
+# set (Day 3). The eval harness must never read this table. Any change must be explained
+# and re-approved by the human lead.
 SAMPLE_RULE_COUNTS = {
     ALPHA: {
         "R_NO_RELEVANT_EVIDENCE": 25,
@@ -344,7 +348,8 @@ SAMPLE_RULE_COUNTS = {
 
 
 @pytest.mark.parametrize("org", [ALPHA, BRAVO])
-def test_sample_rule_counts_snapshot(app_engine, loaded, org):
+def test_regression_snapshot_sample(app_engine, loaded, org):
+    """Regression check on the sample; not ground truth, not an eval metric."""
     decisions = _latest_run(app_engine, org)
     assert dict(Counter(d.rule_id for d in decisions)) == SAMPLE_RULE_COUNTS[org]
     assert all(d.decision == Decision.REVIEW for d in decisions)  # 0 CLAIM on the sample
@@ -362,7 +367,8 @@ def test_precheck_failure_fails_open_for_every_charge(app_engine, loaded, monkey
     assert {d.subject.line_id for d in result.decisions} == {"SYN-1", "SYN-2"}
     for d in result.decisions:
         assert d.status == RecordStatus.PENDING and d.rule_id == "R_ENGINE_ERROR"
-        assert d.reason_code is None and "ValueError: bad rules" in d.reason
+        assert d.reason_code is not None and d.reason_code.value == "ENGINE_ERROR"
+        assert "ValueError: bad rules" in d.reason
     with org_session(app_engine, org) as s:
         assert len(repo.list_decisions(s, result.run_id)) == 2
 
@@ -378,4 +384,4 @@ def test_dependency_failure_is_model_unavailable(app_engine, loaded, monkeypatch
     result = run_org(app_engine, org, AS_OF)
     for d in result.decisions:
         assert d.status == RecordStatus.PENDING and d.decision == Decision.REVIEW
-        assert d.reason_code is not None and d.reason_code.value == "MODEL_UNAVAILABLE"
+        assert d.reason_code is not None and d.reason_code.value == "DEPENDENCY_UNAVAILABLE"

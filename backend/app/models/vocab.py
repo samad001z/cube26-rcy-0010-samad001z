@@ -23,6 +23,9 @@ class ReasonCode(StrEnum):
     NO_RELEVANT_EVIDENCE = "NO_RELEVANT_EVIDENCE"
     EVIDENCE_OUTSIDE_WINDOW = "EVIDENCE_OUTSIDE_WINDOW"
     MODEL_UNAVAILABLE = "MODEL_UNAVAILABLE"
+    DEPENDENCY_UNAVAILABLE = "DEPENDENCY_UNAVAILABLE"  # database or other dependency failed
+    ENGINE_ERROR = "ENGINE_ERROR"  # the rule engine raised on this charge
+    FILING_WINDOW_EXPIRED = "FILING_WINDOW_EXPIRED"  # sourced deadline known and passed
 
 
 class RecordStatus(StrEnum):

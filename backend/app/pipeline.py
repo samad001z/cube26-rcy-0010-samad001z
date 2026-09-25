@@ -103,9 +103,13 @@ def fail_open_decision(
         run_id=run_id,
         decision=Decision.REVIEW,
         evidence_status=EvidenceStatus.INSUFFICIENT,
-        # Rule 5: a failed dependency (the database here; a model later) is MODEL_UNAVAILABLE.
-        # A bug in the engine itself carries no reason code; the error is in the reason.
-        reason_code=ReasonCode.MODEL_UNAVAILABLE if isinstance(exc, SQLAlchemyError) else None,
+        # Rule 5: a failed database or other dependency is DEPENDENCY_UNAVAILABLE; an exception
+        # in the engine itself is ENGINE_ERROR. MODEL_UNAVAILABLE is reserved for the LLM layer.
+        reason_code=(
+            ReasonCode.DEPENDENCY_UNAVAILABLE
+            if isinstance(exc, SQLAlchemyError)
+            else ReasonCode.ENGINE_ERROR
+        ),
         rule_id=ENGINE_ERROR_RULE,
         rule_path=[ENGINE_ERROR_RULE],
         reason=f"The engine failed on this charge, so it was kept for review ({why}).",

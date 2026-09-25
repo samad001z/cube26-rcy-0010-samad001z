@@ -20,12 +20,12 @@ decision rests on, and the decision's confidence is that check's confidence.
   13  R_AMOUNT_NOT_COMPUTABLE    fee whose amount needs an unsourced rule      REVIEW
   14  R_PARTIAL_COVERAGE         contradicted for some of the units            REVIEW
   15  R_DEFECT_CATEGORY_MISSING  inbound defect fee names no category          REVIEW
-  16  R_FILING_WINDOW_PASSED     sourced deadline has passed                   REVIEW
+  16  R_FILING_WINDOW_PASSED     sourced deadline has passed                   DO_NOT_CLAIM
   17  R_CONTRADICTED_FULL        contradicted for every unit                   CLAIM
 
 A duplicate (rule 4) is still subject to rules 5 and 16: fully reimbursed -> rule 5; a
-passed deadline -> REVIEW. An unverified deadline never blocks a CLAIM; it adds the
-warning "filing deadline not verified" (D-014).
+passed deadline -> DO_NOT_CLAIM with FILING_WINDOW_EXPIRED (D-015a). An unverified
+deadline never blocks a CLAIM; it adds the warning "filing deadline not verified" (D-014).
 """
 
 from collections.abc import Sequence
@@ -247,11 +247,11 @@ def _fire(
         if pre.filing.verdict == Verdict.FAIL:
             return Fired(
                 "R_FILING_WINDOW_PASSED",
-                Decision.REVIEW,
-                ReasonCode.DUPLICATE_CHARGE,
+                Decision.DO_NOT_CLAIM,
+                ReasonCode.FILING_WINDOW_EXPIRED,
                 "within_filing_window",
-                f"duplicate of {c.line_id}, but the filing window has passed: {pre.filing.detail}.",
-                "Check whether the channel still accepts a dispute for this duplicate.",
+                f"duplicate of {c.line_id}, but the filing window has passed, so it can no "
+                f"longer be claimed: {pre.filing.detail}.",
             )
         return Fired(
             "R_DUPLICATE",
@@ -370,12 +370,11 @@ def _fire(
     if pre.filing.verdict == Verdict.FAIL:
         return Fired(
             "R_FILING_WINDOW_PASSED",
-            Decision.REVIEW,
-            None,
+            Decision.DO_NOT_CLAIM,
+            ReasonCode.FILING_WINDOW_EXPIRED,
             "within_filing_window",
-            f"evidence contradicts the charge, but the filing window has passed: "
-            f"{pre.filing.detail}.",
-            "Check whether the channel still accepts a dispute for this charge.",
+            f"evidence contradicts the charge, but the filing window has passed, so it can no "
+            f"longer be claimed: {pre.filing.detail}.",
         )
     return Fired(
         "R_CONTRADICTED_FULL",
@@ -398,7 +397,7 @@ def _no_evidence_action(charge: Charge, cfg: EngineConfig) -> str:
 def _citations(charge: Charge, pre: Precheck, a: Assessment, fired: Fired) -> list[Citation]:
     out: list[Citation] = []
     dup = pre.duplicate_of
-    if dup is not None and fired.reason_code == ReasonCode.DUPLICATE_CHARGE:
+    if dup is not None:  # the earlier line is the evidence that this one is a duplicate
         out.append(
             Citation(
                 kind="charge",

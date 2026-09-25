@@ -17,7 +17,7 @@ alibi run --report ... --upstream ... --org ...
     persist + audit        decisions row (append-only), DECISION audit event
 ```
 
-If deciding one charge raises, that charge is still persisted as REVIEW with status `pending` (rule `R_ENGINE_ERROR`; `reason_code` `MODEL_UNAVAILABLE` if a dependency such as the database failed), inside a savepoint so the rest of the run continues. A pre-check failure fails open every charge of the run.
+If deciding one charge raises, that charge is still persisted as REVIEW with status `pending` (rule `R_ENGINE_ERROR`; `reason_code` `DEPENDENCY_UNAVAILABLE` if the database or another dependency failed, `ENGINE_ERROR` otherwise), inside a savepoint so the rest of the run continues. A pre-check failure fails open every charge of the run.
 
 Configuration:
 - `config/rules/amazon_us.yaml`: channel rules only. A value needs a source URL, a retrieval date, `retrieved_by: human` and a verbatim excerpt, or the loader refuses it. Unsourced values are null.
@@ -43,7 +43,7 @@ Configuration:
 | 1 | R_FEE_REFUND_LINE | DO_NOT_CLAIM | not_already_reimbursed |
 | 2 | R_ZERO_FEE | DO_NOT_CLAIM | amount_computable |
 | 3 | R_REIMBURSEMENT_AMBIGUOUS | REVIEW | not_already_reimbursed |
-| 4 | R_DUPLICATE | CLAIM (REVIEW if the sourced deadline passed) | not_duplicate |
+| 4 | R_DUPLICATE | CLAIM (DO_NOT_CLAIM, `FILING_WINDOW_EXPIRED`, if the sourced deadline passed) | not_duplicate |
 | 5 | R_ALREADY_REIMBURSED | DO_NOT_CLAIM | not_already_reimbursed |
 | 6 | R_UNRESOLVED_UNIT | REVIEW | unit_resolved |
 | 7 | R_EVIDENCE_OUTSIDE_WINDOW | REVIEW | evidence_in_custody_window |
@@ -55,7 +55,7 @@ Configuration:
 | 13 | R_AMOUNT_NOT_COMPUTABLE (fees) | REVIEW | amount_computable |
 | 14 | R_PARTIAL_COVERAGE | REVIEW | evidence_contradicts_charge |
 | 15 | R_DEFECT_CATEGORY_MISSING | REVIEW | evidence_contradicts_charge |
-| 16 | R_FILING_WINDOW_PASSED | REVIEW | within_filing_window |
+| 16 | R_FILING_WINDOW_PASSED | DO_NOT_CLAIM (`FILING_WINDOW_EXPIRED`) | within_filing_window |
 | 17 | R_CONTRADICTED_FULL | CLAIM | evidence_contradicts_charge |
 
 After the engine: `R_CITATION_INVALID` (validator) or `R_ENGINE_ERROR` (exception), both REVIEW with status `pending`.

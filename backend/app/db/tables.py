@@ -65,6 +65,7 @@ attachments = sa.Table(
     metadata,
     sa.Column("key", sa.Text, primary_key=True),
     sa.Column("organization_id", sa.Text),
+    sa.Column("agent", sa.Text),
     sa.Column("record_id", sa.Text),
     sa.Column("source_path", sa.Text),
 )

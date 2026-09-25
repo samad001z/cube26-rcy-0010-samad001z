@@ -1,8 +1,9 @@
 """Citation validator. Runs on every decision after the engine, against data re-read from
 the store (not the objects the engine used), and fails closed:
 
-- every cited evidence record exists for this organisation, its stored hash equals the
-  cited hash, the body re-hashes to the same value, and every cited check_key exists on it;
+- every cited evidence record exists for this organisation under the cited pod and id, its
+  stored hash equals the cited hash, the body re-hashes to the same value, and every cited
+  check_key exists on it;
 - evidence cited as contradicting or supporting the charge lies inside its custody window;
 - every cited charge line exists and re-hashes to the cited hash; so does the decided charge;
 - the reimbursed amount is no more than the cited refund lines add up to in the store;
@@ -34,7 +35,7 @@ class StoredRecord:
 
 
 class Lookup(Protocol):
-    def evidence(self, record_id: str) -> StoredRecord | None: ...
+    def evidence(self, agent: str, record_id: str) -> StoredRecord | None: ...
 
     def charge(self, line_id: str) -> Charge | None: ...
 
@@ -55,11 +56,16 @@ def validate(
     refunded = Decimal("0.00")
     for cite in decision.citations:
         if cite.kind == "evidence":
-            stored = lookup.evidence(cite.id)
+            if cite.agent is None:
+                errors.append(f"cited record {cite.id} names no pod")
+                continue
+            stored = lookup.evidence(cite.agent, cite.id)
             if stored is None:
                 errors.append(f"cited record {cite.id} not found")
                 continue
             rec = stored.record
+            if rec.agent != cite.agent or rec.record_id != cite.id:
+                errors.append(f"cited record {cite.id} resolved to another record")
             if rec.organization_id != org:
                 errors.append(f"cited record {cite.id} belongs to another organisation")
             if not (stored.stored_hash == cite.content_hash == rec.content_hash):

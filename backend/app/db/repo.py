@@ -21,6 +21,7 @@ from app.models.decision import DecisionRecord
 class AttachmentRow:
     key: str
     organization_id: str
+    agent: str | None  # null for rows ingested before migration 0003
     record_id: str
     source_path: str
 
@@ -45,10 +46,10 @@ def upsert_ingest_file(
 def insert_records(
     session: Session,
     records: Sequence[EvidenceRecord],
-    sources: dict[str, SourceRef],
+    sources: dict[tuple[str, str], SourceRef],
     ingest_file_id: uuid.UUID,
 ) -> int:
-    """Returns the number of newly inserted rows; existing (org, record_id) rows are kept."""
+    """Returns the number of newly inserted rows; existing (org, agent, record_id) rows are kept."""
     inserted = 0
     for r in records:
         stmt = (
@@ -64,10 +65,10 @@ def insert_records(
                 status=r.status.value,
                 content_hash=r.content_hash,
                 body=r.model_dump(mode="json"),
-                source=sources[r.record_id].model_dump(mode="json"),
+                source=sources[(r.agent, r.record_id)].model_dump(mode="json"),
                 ingest_file_id=ingest_file_id,
             )
-            .on_conflict_do_nothing(index_elements=["organization_id", "record_id"])
+            .on_conflict_do_nothing(index_elements=["organization_id", "agent", "record_id"])
             .returning(t.evidence_records.c.id)
         )
         inserted += len(session.execute(stmt).all())
@@ -82,6 +83,7 @@ def insert_attachments(session: Session, attachments: Sequence[AttachmentRef]) -
             .values(
                 key=a.key,
                 organization_id=a.organization_id,
+                agent=a.agent,
                 record_id=a.record_id,
                 source_path=a.source_path,
             )
@@ -142,9 +144,14 @@ def add_audit_event(
     )
 
 
-def get_record(session: Session, record_id: str) -> EvidenceRecord | None:
+def _record_key(agent: str, record_id: str) -> sa.ColumnElement[bool]:
+    """Evidence is keyed by pod and record_id: record_id is unique only within a pod (D-018)."""
+    return sa.and_(t.evidence_records.c.agent == agent, t.evidence_records.c.record_id == record_id)
+
+
+def get_record(session: Session, agent: str, record_id: str) -> EvidenceRecord | None:
     body = session.execute(
-        sa.select(t.evidence_records.c.body).where(t.evidence_records.c.record_id == record_id)
+        sa.select(t.evidence_records.c.body).where(_record_key(agent, record_id))
     ).scalar_one_or_none()
     return EvidenceRecord.model_validate(body) if body is not None else None
 
@@ -153,7 +160,7 @@ def get_attachment(session: Session, key: str) -> AttachmentRow | None:
     row = session.execute(sa.select(t.attachments).where(t.attachments.c.key == key)).first()
     if row is None:
         return None
-    return AttachmentRow(row.key, row.organization_id, row.record_id, row.source_path)
+    return AttachmentRow(row.key, row.organization_id, row.agent, row.record_id, row.source_path)
 
 
 def list_charges(session: Session) -> list[Charge]:
@@ -170,7 +177,9 @@ def count_rows(session: Session, table: sa.Table) -> int:
 def list_records(session: Session) -> list[EvidenceRecord]:
     bodies: Sequence[Any] = (
         session.execute(
-            sa.select(t.evidence_records.c.body).order_by(t.evidence_records.c.record_id)
+            sa.select(t.evidence_records.c.body).order_by(
+                t.evidence_records.c.agent, t.evidence_records.c.record_id
+            )
         )
         .scalars()
         .all()
@@ -178,11 +187,13 @@ def list_records(session: Session) -> list[EvidenceRecord]:
     return [EvidenceRecord.model_validate(b) for b in bodies]
 
 
-def get_record_with_hash(session: Session, record_id: str) -> tuple[EvidenceRecord, str] | None:
+def get_record_with_hash(
+    session: Session, agent: str, record_id: str
+) -> tuple[EvidenceRecord, str] | None:
     """The record body and the content_hash column written at ingestion."""
     row = session.execute(
         sa.select(t.evidence_records.c.body, t.evidence_records.c.content_hash).where(
-            t.evidence_records.c.record_id == record_id
+            _record_key(agent, record_id)
         )
     ).first()
     if row is None:

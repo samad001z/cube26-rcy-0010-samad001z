@@ -30,9 +30,9 @@ def render_decision(d: DecisionRecord) -> list[str]:
             lines.append(f"  evidence: {c.kind} {c.id} ({_short(c.content_hash)}) {c.role}{keys}")
     else:
         lines.append("  evidence: none cited")
-    cited = {c.id for c in d.citations}
+    cited = {(c.agent, c.id) for c in d.citations if c.kind == "evidence"}
     for r in d.evidence_considered:
-        if r.record_id not in cited:
+        if (r.agent, r.record_id) not in cited:
             state = "usable, not cited" if r.usable else "not usable"
             lines.append(f"  read:     {r.record_id} ({r.agent}) {state}: {r.reason}")
     lines.append("  checks:   " + " ".join(f"{c.check_key}={c.verdict.value}" for c in d.checks))

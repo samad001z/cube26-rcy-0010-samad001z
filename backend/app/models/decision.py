@@ -9,7 +9,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.core.hashing import content_hash
 from app.models.contract import Check, Image, Outcome, Override
@@ -35,9 +35,17 @@ class Citation(_Frozen):
 
     kind: Literal["evidence", "charge"]
     id: str  # evidence record_id or charge line_id
+    # Pod of a cited evidence record; record_id is unique only within a pod (D-018).
+    agent: str | None = None
     content_hash: str
     role: CitationRole
     check_keys: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _agent_matches_kind(self) -> Self:
+        if (self.kind == "evidence") != (self.agent is not None):
+            raise ValueError("an evidence citation names its pod; a charge citation does not")
+        return self
 
 
 class ConsideredRecord(_Frozen):

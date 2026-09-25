@@ -72,7 +72,8 @@ def test_every_cited_record_exists_in_the_same_org_with_the_cited_hash(app_engin
             for d in _latest_run(app_engine, org):
                 for c in d.citations:
                     if c.kind == "evidence":
-                        found = repo.get_record_with_hash(s, c.id)
+                        assert c.agent is not None
+                        found = repo.get_record_with_hash(s, c.agent, c.id)
                         assert found is not None and found[1] == c.content_hash
                     else:
                         ch = repo.get_charge(s, c.id)
@@ -176,7 +177,7 @@ def _load_synthetic(app_engine: Engine, org: str) -> None:
         fid = repo.upsert_ingest_file(s, org, "synthetic.csv", "a" * 64, "fee_report")
         repo.insert_charges(s, [c, other], fid)
         repo.insert_records(
-            s, [r], {r.record_id: SourceRef(file_sha256="b" * 64, row=1, raw={})}, fid
+            s, [r], {(r.agent, r.record_id): SourceRef(file_sha256="b" * 64, row=1, raw={})}, fid
         )
 
 

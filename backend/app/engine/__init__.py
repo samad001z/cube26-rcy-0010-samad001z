@@ -497,6 +497,7 @@ def _citations(charge: Charge, pre: Precheck, a: Assessment, fired: Fired) -> li
         out.append(
             Citation(
                 kind="evidence",
+                agent=f.record.agent,
                 id=f.record.record_id,
                 content_hash=f.record.content_hash,
                 role=f.polarity,

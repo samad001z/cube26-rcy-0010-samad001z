@@ -24,11 +24,13 @@ class DictLookup:
     """In-memory store for unit tests. The DB-backed lookup is tested in test_pipeline_db."""
 
     def __init__(self, records: Sequence[EvidenceRecord] = (), charges: Sequence[Charge] = ()):
-        self.records = {r.record_id: StoredRecord(r, r.content_hash or "") for r in records}
+        self.records = {
+            (r.agent, r.record_id): StoredRecord(r, r.content_hash or "") for r in records
+        }
         self.charges = {c.line_id: c for c in charges}
 
-    def evidence(self, record_id: str) -> StoredRecord | None:
-        return self.records.get(record_id)
+    def evidence(self, agent: str, record_id: str) -> StoredRecord | None:
+        return self.records.get((agent, record_id))
 
     def charge(self, line_id: str) -> Charge | None:
         return self.charges.get(line_id)
@@ -110,14 +112,14 @@ def test_tampered_record_body_is_detected():
         }
     )
     lookup = DictLookup([], [c])
-    lookup.records["PRP-1"] = StoredRecord(tampered, r.content_hash or "")
+    lookup.records[("prep", "PRP-1")] = StoredRecord(tampered, r.content_hash or "")
     assert "cited record PRP-1 body does not match its hash" in validate(d, c, lookup, CFG)
 
 
 def test_stored_hash_different_from_cited_is_detected():
     d, c, r = _claim_case()
     lookup = DictLookup([], [c])
-    lookup.records["PRP-1"] = StoredRecord(r, "f" * 64)
+    lookup.records[("prep", "PRP-1")] = StoredRecord(r, "f" * 64)
     assert "cited record PRP-1 hash mismatch" in validate(d, c, lookup, CFG)
 
 
@@ -146,6 +148,7 @@ def test_citation_outside_custody_window_is_rejected():
             "citations": [
                 Citation(
                     kind="evidence",
+                    agent="prep",
                     id="PRP-1",
                     content_hash=late.content_hash or "",
                     role="contradicts",

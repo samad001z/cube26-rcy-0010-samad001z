@@ -57,8 +57,8 @@ class DbLookup:
     def __init__(self, session: Session):
         self.session = session
 
-    def evidence(self, record_id: str) -> StoredRecord | None:
-        found = repo.get_record_with_hash(self.session, record_id)
+    def evidence(self, agent: str, record_id: str) -> StoredRecord | None:
+        found = repo.get_record_with_hash(self.session, agent, record_id)
         return StoredRecord(*found) if found else None
 
     def charge(self, line_id: str) -> Charge | None:

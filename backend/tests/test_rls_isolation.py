@@ -59,9 +59,9 @@ def test_each_org_sees_only_its_own_rows_in_every_table(app_engine, loaded, tabl
 
 def test_bravo_cannot_fetch_alpha_record_by_id(app_engine, loaded):
     with org_session(app_engine, ALPHA) as s:
-        assert repo.get_record(s, "RCV-0001") is not None  # UNIT-0001 is alpha
+        assert repo.get_record(s, "receiving", "RCV-0001") is not None  # UNIT-0001 is alpha
     with org_session(app_engine, BRAVO) as s:
-        assert repo.get_record(s, "RCV-0001") is None
+        assert repo.get_record(s, "receiving", "RCV-0001") is None
 
 
 def test_bravo_cannot_fetch_alpha_attachment_by_key(app_engine, loaded):

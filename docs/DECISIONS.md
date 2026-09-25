@@ -38,7 +38,7 @@ Status: accepted (2026-09-25). Context: the organisers' contract document is not
 Status: accepted (2026-09-25). Every table has `organization_id NOT NULL`, RLS enabled and FORCED, one policy (`USING` and `WITH CHECK` on `current_setting('app.current_org', true)`). The app connects as `alibi_app` (no superuser, no BYPASSRLS) and sets the org per transaction through `org_session`; with no org set it reads zero rows. `alibi_app` has SELECT and INSERT only, so evidence and `audit_events` cannot be updated or deleted through it. Limitation: the owner role can still modify data, so the audit log is append-only at the application role level, not beyond.
 
 ### D-010 Attachment keys
-Status: accepted (2026-09-25). Key = HMAC-SHA256(secret, org | record_id | source path). Deterministic (idempotent reloads), not derivable without `ATTACHMENT_KEY_SECRET`, and the raw path is stored only in the RLS-protected `attachments` table.
+Status: accepted (2026-09-25). Key = HMAC-SHA256(secret, org | agent | record_id | source path) (agent added by D-018). Deterministic (idempotent reloads), not derivable without `ATTACHMENT_KEY_SECRET`, and the raw path is stored only in the RLS-protected `attachments` table.
 
 ### D-011 Zero-amount lines
 Status: accepted (2026-09-25, approved by the human lead). Each `charge_type` has a `kind` in `config/engine.yaml`.
@@ -109,3 +109,11 @@ Status: accepted (2026-09-25, human lead). Context: the human lead pasted verbat
 
 ### D-008 update: confirmed by the organisers (2026-09-25)
 Nandhan Rao (Sydon) confirmed in the official participant group that no exact JSON schema or type definitions exist for subject, agent, images and outcome. Participants should proceed from the handbook field list and document assumptions. D-008 stands as the contract baseline; its assumptions are listed in README "Assumptions and limitations".
+
+### D-018 Evidence is keyed by pod and record_id
+Status: accepted (2026-09-27, review triage of docs/reviews/copilot-pr14.md, approved Day 3 plan). Context: a `record_id` is unique only within the pod that emits it, but evidence was unique on `(organization_id, record_id)` and looked up by `record_id` alone, so a prep record and a returns record with the same id would collide and a citation could resolve to the wrong one. Decision:
+- `evidence_records` is unique on `(organization_id, agent, record_id)` (migration 0003). Every lookup takes the pod and the id (`repo.get_record`, `repo.get_record_with_hash`).
+- An evidence citation carries `agent`; a charge citation does not (model validation). The validator looks the record up by pod and id and fails closed if the stored record's pod or id differ.
+- Attachments store `agent`, and the attachment key's HMAC input includes it (D-010). Rows ingested before 0003 keep a null `agent`.
+- The adapter refuses a duplicate `(org, agent, record_id)` within one load and keys raw sources by `(agent, record_id)`.
+- Consequence: decision records now carry `agent` on evidence citations, so their content hashes differ from Day 2 runs of the same inputs. Decisions and rule counts do not change.

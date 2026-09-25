@@ -35,6 +35,7 @@ class Quarantined:
 @dataclass(frozen=True)
 class AttachmentRef:
     organization_id: str
+    agent: str
     record_id: str
     key: str
     source_path: str
@@ -43,7 +44,8 @@ class AttachmentRef:
 @dataclass
 class UpstreamLoad:
     records: list[EvidenceRecord] = field(default_factory=list)
-    sources: dict[str, SourceRef] = field(default_factory=dict)  # record_id -> raw row
+    # (agent, record_id) -> raw row. record_id is unique only within a pod (D-018).
+    sources: dict[tuple[str, str], SourceRef] = field(default_factory=dict)
     attachments: list[AttachmentRef] = field(default_factory=list)
     quarantined: list[Quarantined] = field(default_factory=list)
 
@@ -60,9 +62,10 @@ def load_config(path: Path = CONFIG_PATH) -> dict[str, Any]:
     return cfg
 
 
-def attachment_key(secret: str, organization_id: str, record_id: str, path: str) -> str:
-    """Non-guessable, org-scoped key. Deterministic, so reloads are idempotent."""
-    msg = f"{organization_id}|{record_id}|{path}".encode()
+def attachment_key(secret: str, organization_id: str, agent: str, record_id: str, path: str) -> str:
+    """Non-guessable, org-scoped key. Deterministic, so reloads are idempotent. The pod is
+    part of the key because record_id is unique only within a pod (D-018)."""
+    msg = f"{organization_id}|{agent}|{record_id}|{path}".encode()
     return hmac.new(secret.encode(), msg, hashlib.sha256).hexdigest()
 
 
@@ -200,9 +203,9 @@ def _build_record(
     for path in (p.strip() for p in (row.get("photo_refs") or "").split(";")):
         if not path:
             continue
-        key = attachment_key(secret, org, record_id, path)
+        key = attachment_key(secret, org, pod, record_id, path)
         images.append(Image(key=key))
-        attachments.append(AttachmentRef(org, record_id, key, path))
+        attachments.append(AttachmentRef(org, pod, record_id, key, path))
 
     record = EvidenceRecord(
         record_id=record_id,
@@ -228,7 +231,7 @@ def load_upstream(
 ) -> UpstreamLoad:
     cfg = config or load_config()
     result = UpstreamLoad()
-    seen: set[tuple[str, str]] = set()
+    seen: set[tuple[str, str, str]] = set()
     for pod, pod_cfg in cfg["pods"].items():
         path = directory / pod_cfg["file"]
         file_hash = file_sha256(path)
@@ -236,15 +239,15 @@ def load_upstream(
             for n, row in enumerate(csv.DictReader(fh), start=1):
                 try:
                     record, atts = _build_record(pod, pod_cfg, cfg["schema_version"], row, secret)
-                    key = (record.organization_id, record.record_id)
+                    key = (record.organization_id, record.agent, record.record_id)
                     if key in seen:
-                        raise ValueError(f"duplicate record_id {record.record_id!r}")
+                        raise ValueError(f"duplicate {pod} record_id {record.record_id!r}")
                 except (ValueError, KeyError, ValidationError) as exc:
                     result.quarantined.append(Quarantined(path.name, n, str(exc), dict(row)))
                     continue
                 seen.add(key)
                 result.records.append(record)
-                result.sources[record.record_id] = SourceRef(
+                result.sources[(record.agent, record.record_id)] = SourceRef(
                     file_sha256=file_hash, row=n, raw=dict(row)
                 )
                 result.attachments.extend(atts)

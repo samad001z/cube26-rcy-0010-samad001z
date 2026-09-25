@@ -443,3 +443,11 @@ def test_dependency_failure_is_model_unavailable(app_engine, loaded, monkeypatch
     for d in result.decisions:
         assert d.status == RecordStatus.PENDING and d.decision == Decision.REVIEW
         assert d.reason_code is not None and d.reason_code.value == "DEPENDENCY_UNAVAILABLE"
+
+
+def test_run_reports_latency_for_every_charge(app_engine, loaded):
+    org = "org_test_latency"
+    _load_synthetic(app_engine, org)
+    result = run_org(app_engine, org, AS_OF)
+    assert set(result.latency_ms) == {d.subject.line_id for d in result.decisions}
+    assert all(ms > 0 for ms in result.latency_ms.values())

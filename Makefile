@@ -3,6 +3,8 @@ export DATABASE_URL ?= postgresql+psycopg://alibi_app:local_dev_only@localhost:5
 export MIGRATION_DATABASE_URL ?= postgresql+psycopg://alibi_owner:local_dev_only@localhost:5432/alibi
 export TEST_DATABASE_URL ?= postgresql+psycopg://alibi_app:local_dev_only@localhost:5432/alibi_test
 export TEST_MIGRATION_DATABASE_URL ?= postgresql+psycopg://alibi_owner:local_dev_only@localhost:5432/alibi_test
+export EVAL_DATABASE_URL ?= postgresql+psycopg://alibi_app:local_dev_only@localhost:5432/alibi_eval
+export EVAL_MIGRATION_DATABASE_URL ?= postgresql+psycopg://alibi_owner:local_dev_only@localhost:5432/alibi_eval
 export ATTACHMENT_KEY_SECRET ?= local-dev-attachment-secret
 export LLM_ENABLED ?= false
 
@@ -46,3 +48,7 @@ run:
 # Held-out eval (eval/README.md). `sheet` rebuilds the labelling sheet from eval/data.
 sheet:
 	cd backend && uv run python ../eval/make_sheet.py
+
+# Refuses unless both label files are committed; see eval/README.md. Resets alibi_eval.
+eval:
+	cd backend && uv run python ../eval/run_eval.py

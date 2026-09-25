@@ -7,9 +7,10 @@ the reason and in the audit log. Everything runs inside one org-scoped session, 
 security applies to every read and write.
 """
 
+import time
 import uuid
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
@@ -55,6 +56,9 @@ class RunResult:
     organization_id: str
     as_of: date
     decisions: list[DecisionRecord]
+    # Wall-clock milliseconds per charge (decide, validate, persist), keyed by line_id.
+    # Measurement only: never part of a decision record or its hash.
+    latency_ms: dict[str, float] = field(default_factory=dict)
 
 
 class DbLookup:
@@ -178,6 +182,7 @@ def run_org(
     decided_at = now or datetime.now(UTC)
     run_id = str(uuid.uuid4())
     decisions: list[DecisionRecord] = []
+    latency_ms: dict[str, float] = {}
     with org_session(engine, org) as session:
         charges = repo.list_charges(session)
         by_unit: dict[str, list[EvidenceRecord]] = defaultdict(list)
@@ -204,6 +209,7 @@ def run_org(
             },
         )
         for charge in charges:
+            started = time.perf_counter()
             try:
                 if precheck_error is not None:
                     raise precheck_error
@@ -230,10 +236,11 @@ def run_org(
                 )
             repo.add_audit_event(session, org, "DECISION", _audit_payload(d))
             decisions.append(d)
+            latency_ms[charge.line_id] = (time.perf_counter() - started) * 1000
         counts: dict[str, int] = defaultdict(int)
         for d in decisions:
             counts[d.decision.value] += 1
         repo.add_audit_event(
             session, org, "RUN_COMPLETED", {"run_id": run_id, "decisions": dict(counts)}
         )
-    return RunResult(run_id, org, as_of, decisions)
+    return RunResult(run_id, org, as_of, decisions, latency_ms)

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Creates the two roles and the dev/test databases.
+# Creates the two roles and the dev, test and eval databases.
 #   alibi_owner: owns the schema and tables, runs migrations.
 #   alibi_app:   what the application connects as. Not a superuser, no BYPASSRLS,
 #                so row-level security always applies to it.
@@ -13,9 +13,10 @@ CREATE ROLE alibi_owner LOGIN PASSWORD :'owner_pw' NOSUPERUSER NOCREATEROLE NOBY
 CREATE ROLE alibi_app   LOGIN PASSWORD :'app_pw'   NOSUPERUSER NOCREATEROLE NOCREATEDB NOBYPASSRLS;
 CREATE DATABASE alibi      OWNER alibi_owner;
 CREATE DATABASE alibi_test OWNER alibi_owner;
+CREATE DATABASE alibi_eval OWNER alibi_owner;
 SQL
 
-for db in alibi alibi_test; do
+for db in alibi alibi_test alibi_eval; do
   psql -v ON_ERROR_STOP=1 --username "${POSTGRES_USER:-postgres}" --dbname "$db" <<'SQL'
 ALTER SCHEMA public OWNER TO alibi_owner;
 REVOKE ALL ON SCHEMA public FROM PUBLIC;

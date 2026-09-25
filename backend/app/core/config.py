@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     # HMAC secret for attachment keys. Keys cannot be derived without it.
     attachment_key_secret: SecretStr
     llm_enabled: bool = False
+    # API keys for POST /agent: `org_id:sha256hex,...` (hashes only; see app/api/auth.py).
+    # Empty means no key is valid, so POST /agent answers 401 to everyone.
+    alibi_api_keys: str = ""
 
 
 def _one_line(exc: ValidationError) -> str:

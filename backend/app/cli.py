@@ -12,6 +12,7 @@ from typing import Annotated
 
 import typer
 
+from app.api.auth import hash_key, new_key
 from app.core.config import SettingsError, get_settings
 from app.core.rules import load_rules
 from app.db.session import get_engine
@@ -80,6 +81,17 @@ def run(
         typer.echo("")
     for line in render_summary(result.decisions):
         typer.echo(line)
+
+
+@app.command("api-key")
+def api_key(
+    org: Annotated[str, typer.Option(help="Organisation the new key acts for")],
+) -> None:
+    """Make a new API key for POST /agent. Prints the key once and the ALIBI_API_KEYS entry
+    (its hash) to add to .env; the key itself is never stored."""
+    key = new_key()
+    typer.echo(f"key (give to the client, shown once): {key}")
+    typer.echo(f"add to ALIBI_API_KEYS in .env:       {org}:{hash_key(key)}")
 
 
 def main() -> None:

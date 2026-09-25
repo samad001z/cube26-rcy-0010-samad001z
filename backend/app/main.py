@@ -5,9 +5,11 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.api.agent import router as agent_router
 from app.db.session import get_engine
 
 app = FastAPI(title="Alibi Recovery Manager", version="0.1.0")
+app.include_router(agent_router)
 
 
 @app.get("/health")

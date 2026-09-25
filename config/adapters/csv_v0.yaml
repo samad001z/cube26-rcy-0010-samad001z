@@ -1,0 +1,77 @@
+# Maps the older flat sample CSVs (data/upstream/*.csv) into the official evidence
+# contract shape. This is a data-shape adapter, not a rules source: it does not decide
+# whether a channel requirement was met.
+#
+# Verdict policy (documented in docs/DECISIONS.md D-008):
+#   - Only clear-cut values map to PASS or FAIL.
+#   - Values whose meaning depends on a published channel rule (e.g. label on a seam)
+#     map to UNCERTAIN, and the raw value is kept in `detail`. Day 2 rules judge them
+#     against config/rules/.
+#   - `not_required` emits no check (the contract has no N/A verdict). The requirement
+#     flags themselves are stored in subject.requirements.
+#   - An unmapped value quarantines the row; it is never guessed.
+schema_version: csv_v0
+
+pods:
+  receiving:
+    file: receiving_sample.csv
+    id_column: record_id
+    subject_columns: {sku: sku, asin: asin, po_number: po_number, po_line: po_line}
+    requirement_columns: []
+    outcome_column: null
+    enum_checks:
+      - {check_key: identity_match, column: identity_match,
+         map: {"yes": PASS, "no": FAIL, uncertain: UNCERTAIN}}
+      - {check_key: carton_damage, column: carton_damage,
+         map: {none: PASS, crushing: FAIL, tears: FAIL, water: FAIL, uncertain: UNCERTAIN}}
+      - {check_key: unit_damage, column: unit_damage,
+         map: {none: PASS, crushing: FAIL, tears: FAIL, water: FAIL, uncertain: UNCERTAIN}}
+    derived_checks: [qty_received_matches_ordered, cartons_received_matches_ordered, quality_flags]
+
+  prep:
+    file: prep_sample.csv
+    id_column: record_id
+    subject_columns:
+      {sku: sku, asin: asin, fnsku: fnsku, fba_shipment_id: fba_shipment_id}
+    requirement_columns: [wo_polybag, wo_suffocation_warning, wo_expiry_date, wo_handling_marks]
+    outcome_column: null
+    enum_checks:
+      - {check_key: polybag_present_sealed, column: polybag_present_sealed,
+         map: {"yes": PASS, not_sealed: FAIL, missing: FAIL, uncertain: UNCERTAIN, not_required: OMIT}}
+      - {check_key: suffocation_warning, column: suffocation_warning,
+         map: {legible: PASS, missing: FAIL, obscured_by_fold: UNCERTAIN, uncertain: UNCERTAIN,
+               not_required: OMIT}}
+      - {check_key: fnsku_label_placement, column: fnsku_label_placement,
+         map: {flat: PASS, missing: FAIL, on_seam: UNCERTAIN, on_curve: UNCERTAIN,
+               on_edge: UNCERTAIN, uncertain: UNCERTAIN}}
+      - {check_key: original_barcode_covered, column: original_barcode_covered,
+         map: {"yes": PASS, "no": FAIL, uncertain: UNCERTAIN}}
+      - {check_key: expiry_date, column: expiry_date,
+         map: {legible: PASS, illegible_after_wrap: UNCERTAIN, uncertain: UNCERTAIN,
+               not_required: OMIT}}
+      - {check_key: handling_marks, column: handling_marks,
+         map: {all_present: PASS, some_missing: FAIL, uncertain: UNCERTAIN, not_required: OMIT}}
+    derived_checks: []
+
+  pack:
+    file: pack_sample.csv
+    id_column: record_id
+    subject_columns: {order_id: order_id}
+    requirement_columns: []
+    outcome_column: operator_verdict   # seal | stop_and_fix
+    enum_checks: []
+    derived_checks: [contents_match_order]
+
+  returns:
+    file: returns_sample.csv
+    id_column: record_id
+    subject_columns: {order_id: order_id, sku: ordered_sku, asin: ordered_asin}
+    requirement_columns: []
+    outcome_column: operator_disposition   # pending_review => record status pending
+    enum_checks:
+      - {check_key: identity_match, column: identity_match,
+         map: {"yes": PASS, "no": FAIL, uncertain: UNCERTAIN}}
+      - {check_key: returned_item_condition, column: observed_state,
+         map: {factory_sealed: PASS, opened_unused: PASS, signs_of_use: UNCERTAIN,
+               damaged: FAIL, uncertain: UNCERTAIN}}
+    derived_checks: [parts_complete]

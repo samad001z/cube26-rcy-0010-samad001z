@@ -78,3 +78,11 @@ README.md  ARCHITECTURE.md  CLAUDE.md
 ## Dev environment
 
 WSL2 Ubuntu 26.04. Python 3.12 via uv (no system python3.12 package). Node LTS via nvm. Docker Desktop with WSL integration. All commands run in the Ubuntu shell.
+
+## Confirmed by the official handbook (2026-09-25)
+- Decision records follow the fixed evidence contract shape: `outcome` = {`decision`, `decided_by`, `decided_at`}; each check = {`check_key`, `verdict` (PASS/FAIL/UNCERTAIN), `confidence`, `detail`, `model_version`, `latency_ms`}; plus `overrides[]`, `status`, `content_hash`.
+- Recovery's own checks per charge (examples): `unit_resolved`, `evidence_present`, `evidence_in_custody_window`, `evidence_contradicts_charge`, `not_duplicate`, `not_already_reimbursed`, `amount_computable`. Each gets a verdict and a confidence.
+- `confidence` is derived deterministically from the rule path and evidence coverage, documented in ARCHITECTURE.md. Never a number the LLM makes up.
+- `decided_by` is `rules@<engine_version>`, or `human:<reviewer>` after an override.
+- Evaluation: two humans label the held-out charges independently BEFORE the agent runs; report Cohen's kappa, claim precision, FP, FN, REVIEW rate, latency and cost per charge, failure modes, and a table: charge -> human labels -> agent result -> agree/disagree -> notes.
+- LinkedIn post: wait for the official template (27-28 Sep). Tag CodeQuesters and Sydon.AI.

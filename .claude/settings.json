@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Edit", "Write", "Read",
+      "Bash(make:*)", "Bash(uv:*)", "Bash(python:*)", "Bash(pytest:*)",
+      "Bash(ruff:*)", "Bash(mypy:*)", "Bash(alembic:*)",
+      "Bash(npm:*)", "Bash(npx:*)", "Bash(node:*)",
+      "Bash(docker compose:*)", "Bash(docker ps:*)", "Bash(docker logs:*)",
+      "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)",
+      "Bash(git add:*)", "Bash(git commit:*)", "Bash(git branch:*)", "Bash(git checkout:*)",
+      "Bash(ls:*)", "Bash(cat:*)", "Bash(head:*)", "Bash(tail:*)", "Bash(grep:*)",
+      "Bash(find:*)", "Bash(wc:*)", "Bash(mkdir:*)", "Bash(cp:*)", "Bash(mv:*)"
+    ],
+    "deny": [
+      "Read(./.env)", "Read(./.env.*)", "Read(~/.alibi-provider.env)",
+      "Bash(git push --force:*)", "Bash(git push -f:*)",
+      "Bash(rm -rf /:*)", "Bash(sudo:*)"
+    ]
+  }
+}

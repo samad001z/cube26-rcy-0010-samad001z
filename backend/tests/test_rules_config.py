@@ -12,6 +12,7 @@ from app.core.rules import (
     RULES_PATH,
     FilingWindowRule,
     RuleValue,
+    check_windows_consistent,
     load_engine_config,
     load_rules,
     parse_engine_config,
@@ -196,3 +197,18 @@ def test_unmapped_rule_cannot_be_applied_to_a_charge_type():
     data["unmapped_rules"][0]["applies_to"] = "lost_inbound"
     with pytest.raises(ValidationError):
         parse_rules(data)
+
+
+def test_shipped_custody_windows_cover_the_sourced_filing_windows():
+    check_windows_consistent(load_rules(), load_engine_config())
+
+
+def test_custody_window_ending_before_the_filing_window_closes_is_refused():
+    # D-019: a returns window that stops at +60 while claims can be filed until +120 would
+    # read a late but genuine return as "no return".
+    data = yaml.safe_load(ENGINE_PATH.read_text())
+    data["charge_types"]["refund_issued_item_not_returned"]["pods"]["returns"]["max_days_after"] = (
+        60
+    )
+    with pytest.raises(ValueError, match="before the sourced filing window closes at 120"):
+        check_windows_consistent(load_rules(), parse_engine_config(data))

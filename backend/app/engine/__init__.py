@@ -98,13 +98,22 @@ def _evidence_checks(
     in_scope = [c for c in candidates if c.in_scope]
     out_window = [c for c in in_scope if not c.in_window]
 
+    if not resolution.resolved:
+        # No unit, so no record can be said to speak to the charge, nor to be missing: the
+        # question cannot be asked yet, so neither check is PASS or FAIL.
+        unresolved = f"unit not resolved: {resolution.failure}"
+        present = _check("evidence_present", Verdict.UNCERTAIN, exact, unresolved)
+        window = _check("evidence_in_custody_window", Verdict.UNCERTAIN, exact, unresolved)
+        contra = _check("evidence_contradicts_charge", Verdict.UNCERTAIN, exact, a.detail)
+        return [present, window, contra]
+
     present = _check(
         "evidence_present",
         Verdict.FAIL if a.no_relevant else Verdict.PASS,
         exact,
         f"{len(a.findings)} usable record(s) speak to the charge" if a.findings else a.detail,
     )
-    if not resolution.resolved or not in_scope:
+    if not in_scope:
         window = _check(
             "evidence_in_custody_window",
             Verdict.UNCERTAIN,
@@ -138,7 +147,7 @@ def _evidence_checks(
             + (skipped if out_window else ""),
         )
 
-    if a.no_relevant or not resolution.resolved:
+    if a.no_relevant:
         contra = _check("evidence_contradicts_charge", Verdict.UNCERTAIN, exact, a.detail)
     elif a.status == EvidenceStatus.CONTRADICTED:
         cov = a.coverage if a.coverage is not None else Decimal(1)

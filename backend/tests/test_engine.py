@@ -764,3 +764,45 @@ def test_cli_labels_the_decision_confidence_as_routing_confidence():
     head = render_decision(d)[0]
     assert f"routing confidence {d.confidence}" in head
     assert " confidence " not in head.replace("routing confidence", "")
+
+
+# --- Day 3 fixes before eval ----------------------------------------------------------
+
+
+def test_late_genuine_return_inside_the_filing_window_is_not_treated_as_no_return():
+    # Posted 2026-06-24; the return arrives 90 days later, inside the sourced 60-120 day
+    # filing window. Before D-019 the custody window ended at +60 and this read as "no return".
+    late = _returns(captured=datetime(2026, 9, 22, 8, tzinfo=UTC))
+    d = run(_refund_line(), [late])
+    assert d.decision == Decision.DO_NOT_CLAIM and d.rule_id == "R_ITEM_RETURNED"
+    assert _verdicts(d)["evidence_present"] == Verdict.PASS
+    assert _verdicts(d)["evidence_in_custody_window"] == Verdict.PASS
+    assert [c.id for c in d.citations if c.role == "contradicts"] == ["RTN-1"]
+
+
+def test_late_damaged_return_is_still_review_possible_separate_claim():
+    late = _returns(condition="FAIL", captured=datetime(2026, 9, 22, 8, tzinfo=UTC))
+    d = run(_refund_line(), [late])
+    assert d.decision == Decision.REVIEW and d.rule_id == "R_RETURNED_INCOMPLETE_OR_DAMAGED"
+
+
+def test_unresolved_unit_never_shows_evidence_present_pass():
+    d = run(charge(unit_id="U-404"), [prep_all_pass()])
+    present = d.check("evidence_present")
+    assert present.verdict == Verdict.UNCERTAIN
+    assert (present.detail or "").startswith("unit not resolved")
+    assert "U-404" in (present.detail or "")
+    window = d.check("evidence_in_custody_window")
+    assert window.verdict == Verdict.UNCERTAIN
+    assert (window.detail or "").startswith("unit not resolved")
+    assert _verdicts(d)["unit_resolved"] == Verdict.FAIL
+    assert d.rule_id == "R_UNRESOLVED_UNIT" and d.decision == Decision.REVIEW
+
+
+def test_identity_conflict_is_unresolved_and_evidence_present_uncertain():
+    # A record carries the unit, but its sku disagrees with the charge.
+    d = run(charge(sku="SKU-1"), [prep_all_pass(sku="SKU-OTHER")])
+    assert d.rule_id == "R_UNRESOLVED_UNIT"
+    present = d.check("evidence_present")
+    assert present.verdict == Verdict.UNCERTAIN
+    assert (present.detail or "").startswith("unit not resolved: sku conflict")

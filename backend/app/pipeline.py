@@ -18,7 +18,13 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.claims.validator import StoredRecord, enforce, validate
-from app.core.rules import ChannelRules, EngineConfig, load_engine_config, load_rules
+from app.core.rules import (
+    ChannelRules,
+    EngineConfig,
+    check_windows_consistent,
+    load_engine_config,
+    load_rules,
+)
 from app.db import repo
 from app.db.session import org_session
 from app.engine import DECIDED_BY, ENGINE_VERSION, decide
@@ -168,6 +174,7 @@ def run_org(
 ) -> RunResult:
     rules = rules or load_rules()
     cfg = cfg or load_engine_config()
+    check_windows_consistent(rules, cfg)
     decided_at = now or datetime.now(UTC)
     run_id = str(uuid.uuid4())
     decisions: list[DecisionRecord] = []

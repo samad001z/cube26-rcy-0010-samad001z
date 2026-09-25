@@ -44,7 +44,11 @@ charge_types:
     kind: loss_event
     claim_basis: unit_value
     pods:
-      returns: {window: around_posting, max_days_before: 60, max_days_after: 60,
+      # A return can arrive as late as the filing window allows (sourced: 60-120 days after
+      # the refund), so the window after posting runs to the filing window's close (D-019).
+      # A late but genuine return is then never read as "no return". The loader refuses a
+      # max_days_after shorter than the sourced close day (check_windows_consistent).
+      returns: {window: around_posting, max_days_before: 60, max_days_after: 120,
                 match_keys: [order_id]}
 
 # Inbound defect categories (optional `defect_category` column on the fee report) and the

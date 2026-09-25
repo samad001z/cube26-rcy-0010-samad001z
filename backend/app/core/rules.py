@@ -288,3 +288,23 @@ def load_rules(path: Path = RULES_PATH) -> ChannelRules:
 @lru_cache
 def load_engine_config(path: Path = ENGINE_PATH) -> EngineConfig:
     return parse_engine_config(_read(path))
+
+
+def check_windows_consistent(rules: ChannelRules, cfg: EngineConfig) -> None:
+    """Refuse an engine config whose custody window stops looking for evidence that can
+    arrive after posting (e.g. a customer return) before the sourced filing window closes.
+    Otherwise a late but genuine return would read as "no return" while a claim could still
+    be filed (D-019)."""
+    for ct, ct_cfg in cfg.charge_types.items():
+        close = rules.filing_windows[ct].window_close_days
+        if close is None:
+            continue
+        for pod, rel in ct_cfg.pods.items():
+            if rel.window == "before_posting":
+                continue
+            assert rel.max_days_after is not None
+            if rel.max_days_after < close:
+                raise ValueError(
+                    f"{ct.value}: {pod} custody window ends {rel.max_days_after} days after "
+                    f"posting, before the sourced filing window closes at {close} days"
+                )

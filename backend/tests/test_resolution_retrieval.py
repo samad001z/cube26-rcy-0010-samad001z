@@ -1,6 +1,7 @@
 from datetime import UTC, date, datetime
 
 from app.core.rules import load_engine_config
+from app.models.contract import EvidenceRecord
 from app.models.vocab import ChargeType
 from app.resolution import resolve_unit
 from app.retrieval import in_custody_window, retrieve
@@ -99,7 +100,9 @@ def test_returns_window_around_posting_for_refund_line_matches_order():
     )
     same_day = record("RTN-1", agent="returns", order_id="ORD-1", captured=_at(2026, 6, 24, 8))
     other_order = record("RTN-2", agent="returns", order_id="ORD-2", captured=_at(2026, 6, 24))
-    too_late = record("RTN-3", agent="returns", order_id="ORD-1", captured=_at(2026, 9, 1))
+    # D-019: the window after posting runs to the filing window's close (+120 days), so
+    # the first day outside it is +121 (was +61 before D-019).
+    too_late = record("RTN-3", agent="returns", order_id="ORD-1", captured=_at(2026, 10, 23))
     res = resolve_unit(c, [same_day, other_order, too_late])
     cands = {x.record.record_id: x for x in retrieve(c, res, CFG)}
     assert cands["RTN-1"].usable
@@ -126,3 +129,25 @@ def test_in_custody_window_helper_agrees_with_retrieve():
         r = record(captured=captured)
         assert in_custody_window(c, r, CFG) == _one(c, r).in_window
     assert not in_custody_window(c, record("RTN-1", agent="returns"), CFG)
+
+
+def test_refund_returns_custody_window_runs_to_the_filing_window_close():
+    # D-019: posted 2026-06-24; the sourced filing window closes 120 days later (2026-10-22).
+    c = charge(
+        charge_type=ChargeType.REFUND_ISSUED_ITEM_NOT_RETURNED,
+        amount="0.00",
+        order_id="ORD-1",
+        posted=date(2026, 6, 24),
+    )
+
+    def ret(when: datetime) -> EvidenceRecord:
+        return record(
+            "RTN-1", agent="returns", fba_shipment_id=None, order_id="ORD-1", captured=when
+        )
+
+    assert in_custody_window(c, ret(datetime(2026, 4, 25, tzinfo=UTC)), CFG)  # -60 days
+    assert not in_custody_window(c, ret(datetime(2026, 4, 24, 23, tzinfo=UTC)), CFG)
+    assert in_custody_window(c, ret(datetime(2026, 8, 23, tzinfo=UTC)), CFG)  # +60 (old end)
+    assert in_custody_window(c, ret(datetime(2026, 9, 22, tzinfo=UTC)), CFG)  # +90
+    assert in_custody_window(c, ret(datetime(2026, 10, 22, 23, 59, tzinfo=UTC)), CFG)  # +120
+    assert not in_custody_window(c, ret(datetime(2026, 10, 23, tzinfo=UTC)), CFG)  # +121

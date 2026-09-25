@@ -21,7 +21,8 @@ If deciding one charge raises, that charge is still persisted as REVIEW with sta
 
 Configuration:
 - `config/rules/amazon_us.yaml`: channel rules only. A value needs a source URL, a retrieval date, `retrieved_by: human` and a verbatim excerpt, or the loader refuses it. Unsourced values are null. Filing windows have an open and a close day counted from the line's posted date, used as a proxy for the event date the source counts from (D-017).
-- `config/engine.yaml`: this project's engineering choices (charge kinds, relevance, custody windows, defect category coverage, duplicate window, confidence table). See docs/DECISIONS.md D-011, D-013, D-014, D-015.
+- `config/engine.yaml`: this project's engineering choices (charge kinds, relevance, custody windows, defect category coverage, duplicate window, confidence table). See docs/DECISIONS.md D-011, D-013, D-014, D-015, D-019. A custody window that reads evidence after posting must stay open until the sourced filing window closes; every run checks this and refuses a config that breaks it (D-019).
+- Evidence is keyed by `(organization_id, agent, record_id)`: a `record_id` is unique only within its pod. Evidence citations carry the pod, and the validator looks records up by pod and id (D-018).
 
 ## Checks on every decision
 
@@ -31,8 +32,8 @@ Configuration:
 | `not_duplicate` | no earlier line with the same fingerprint | duplicate of an earlier line | - |
 | `not_already_reimbursed` | no, or partial, matching reimbursement | fully reimbursed, or the line is itself a reimbursement | a refund could belong to more than one fee |
 | `within_filing_window` | inside the sourced window | window not open yet ("not yet eligible"), or sourced deadline passed | no sourced deadline ("filing deadline not verified") |
-| `evidence_present` | a usable record speaks to the charge | nothing speaks to it | - |
-| `evidence_in_custody_window` | an in-scope record that speaks to the charge is inside the window | in-scope records exist, none inside | no in-scope record, or none speaks to the charge ("no relevant evidence to check") |
+| `evidence_present` | a usable record speaks to the charge | nothing speaks to it | the unit is not resolved ("unit not resolved: ...") |
+| `evidence_in_custody_window` | an in-scope record that speaks to the charge is inside the window | in-scope records exist, none inside | the unit is not resolved, no in-scope record, or none speaks to the charge ("no relevant evidence to check") |
 | `evidence_contradicts_charge` | CONTRADICTED | SUPPORTED | INSUFFICIENT or CONFLICTING |
 | `amount_computable` | full fee is the claim basis | the amount needs a unit value or an unsourced fee schedule | - |
 

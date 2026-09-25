@@ -40,8 +40,39 @@ Status: accepted (2026-09-25). Every table has `organization_id NOT NULL`, RLS e
 ### D-010 Attachment keys
 Status: accepted (2026-09-25). Key = HMAC-SHA256(secret, org | record_id | source path). Deterministic (idempotent reloads), not derivable without `ATTACHMENT_KEY_SECRET`, and the raw path is stored only in the RLS-protected `attachments` table.
 
-### D-011 Zero-amount lines: open Day 2 rule question
-Status: open. The adapter ingests 0.00 faithfully. For `lost_inbound` and `damaged_in_warehouse`, 0.00 can mean the channel paid no reimbursement for a lost or damaged unit, which may itself be recoverable. 9 of the 61 sample lines are 0.00 (including non-loss types such as FEE-0014-2). Amount 0 must not be treated as "nothing to recover" by default. Decide per charge_type on Day 2, from the published rules.
+### D-011 Zero-amount lines
+Status: accepted (2026-09-25, approved by the human lead). Each `charge_type` has a `kind` in `config/engine.yaml`.
+- `fee` (`inbound_defect_fee`, `fulfilment_fee_weight_tier`): the amount is money taken. A fee of 0.00 has nothing to recover: DO_NOT_CLAIM, rule `R_ZERO_FEE`.
+- `loss_event` (`lost_inbound`, `damaged_in_warehouse`, `refund_issued_item_not_returned`): the amount is the reimbursement already paid; 0.00 means nothing was paid, not that nothing is owed. What is owed needs an authoritative unit value that no upstream record provides, so `amount_computable` = FAIL and the line is REVIEW (`R_AMOUNT_NOT_COMPUTABLE`), never CLAIM, whatever the evidence says. The evidence status is still computed and shown (e.g. CONFLICTING on FEE-0064-1).
+- Rule 9 is unchanged: a claim never exceeds charge minus amounts already reimbursed.
 
 ### D-012 Eval set
 Status: accepted. We build our own held-out set, labelled independently by two humans before the agent runs (Round 2 README and the official handbook). No organiser issue needed.
+
+### D-013 Inbound defect fees need a defect category to be claimed (Option C)
+Status: accepted (2026-09-25, approved by the human lead). The fee report gets an optional `defect_category` column (absent in the csv_v0 sample). `config/engine.yaml` maps each category to the prep checks that can show that defect was not present (e.g. `label` -> `fnsku_label_placement`, `original_barcode_covered`).
+- CLAIM only when `defect_category` is present, mapped, and every covering prep check PASSes in a final prep record inside the custody window, with full unit coverage.
+- Category absent and every prep/label check passes: REVIEW, evidence_status CONTRADICTED (scope: prep/label only), rule `R_DEFECT_CATEGORY_MISSING`, next action: confirm the defect type in Seller Central, then override.
+- Any in-scope prep check FAIL: SUPPORTED, DO_NOT_CLAIM. With no category, the scope is all prep/label checks, so a FAIL on any of them counts. Assumption: a recorded prep defect makes the fee plausible; a human can override.
+- A category not in the mapping, an UNCERTAIN verdict, a covering check that was not recorded, or a pending record: INSUFFICIENT, REVIEW.
+- Consequence: no sample line is CLAIM, because the sample has no `defect_category`.
+
+### D-014 Filing windows: only a known, passed deadline blocks a claim
+Status: accepted (2026-09-25, approved by the human lead). The deadline is the posted date plus the sourced window in `config/rules/amazon_us.yaml`.
+- Known and passed: `within_filing_window` = FAIL. A CLAIM becomes REVIEW (`R_FILING_WINDOW_PASSED`) so a person sees the lost opportunity.
+- Unknown (no sourced value): UNCERTAIN. CLAIM is still allowed, but the reason, the check detail and `warnings` carry "filing deadline not verified". Evidence support and fileability are separate questions.
+- Rule values are pasted by a human (`retrieved_by: human`) with a verbatim excerpt; the loader refuses a value without source URL, date and excerpt. Third-party guides go under `secondary_sources` as notes and never supply a value. All values are null today: this environment cannot reach Amazon's pages (egress policy).
+- Assumption to revisit when the text is pasted: the window runs from the line's posted date. If a published rule anchors elsewhere (e.g. shipment closed date), the anchor must be added to the rule entry.
+
+### D-015 Engine choices made on Day 2 (not channel rules)
+Status: accepted (2026-09-25). All in `config/engine.yaml` or `backend/app/engine/`; none claims to be what the channel publishes.
+- Rule order is fixed and documented in `app/engine/__init__.py`; the first matching rule fires. Each rule names the check it rests on; the decision's confidence is that check's confidence.
+- Confidence is deterministic: 1.00 for a verdict from exact comparison or Decimal/date arithmetic on ingested data; 0.90 for a verdict read from a human operator's recorded check; multiplied by unit coverage on CONTRADICTED. Documented in ARCHITECTURE.md.
+- Custody windows: prep evidence must be captured before the posting date (at most 120 days before) on the same FBA shipment; returns evidence for a refund line must match the order and fall within 60 days either side of posting; a return of a "lost inbound" unit counts within 180 days after posting. Receiving is not relevant to any current charge type: a supplier shortfall is not a channel loss.
+- Unit coverage: one unit-level record covers one unit. A line with quantity 2 and one unit record has coverage 0.5 and goes to REVIEW (`R_PARTIAL_COVERAGE`).
+- Duplicates: same org, report type, charge type, unit, sku, shipment, order, quantity, amount and currency, posted within 30 days; non-zero fee lines only. The earliest is canonical and is cited by content hash.
+- Already reimbursed (heuristic): a `reimbursement_report` line on a fee charge type offsets the earliest fee with the same unit and charge type posted on or before it; each reimbursement line is used once. A loss-event reimbursement never offsets a fee. None matched in the sample.
+- Loss-event evidence polarity: "contradicts" = against the channel's position (favours recovery). Lost inbound: a prep record on the shipment contradicts; a later customer return supports. Damaged in warehouse: a prep record with no failed check contradicts. Refund, item not returned: a returns record with identity PASS contradicts; identity FAIL supports.
+- Citation validation failure: REVIEW, status pending, rule `R_CITATION_INVALID`, `reason_code` null (no new reason code added to the fixed vocabulary). An exception while deciding one charge: REVIEW, pending, rule `R_ENGINE_ERROR`, and the charge is still persisted.
+- Decisions are append-only: each run inserts new rows with a new `run_id`; the app role has SELECT and INSERT only, and a CHECK constraint refuses a CLAIM row without a positive amount.
+- Finding: FORCE RLS applies to the owner role too. An owner UPDATE without `app.current_org` set matches zero rows, so the tamper test sets the org explicitly.

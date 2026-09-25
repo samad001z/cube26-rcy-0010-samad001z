@@ -12,7 +12,7 @@
       "Bash(find:*)", "Bash(wc:*)", "Bash(mkdir:*)", "Bash(cp:*)", "Bash(mv:*)"
     ],
     "deny": [
-      "Read(./.env)", "Read(./.env.*)", "Read(~/.alibi-provider.env)",
+      "Read(./.env)", "Read(./.env.local)", "Read(./.env.production)", "Read(~/.alibi-provider.env)",
       "Bash(git push --force:*)", "Bash(git push -f:*)",
       "Bash(rm -rf /:*)", "Bash(sudo:*)"
     ]

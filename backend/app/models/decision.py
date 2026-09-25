@@ -41,12 +41,14 @@ class Citation(_Frozen):
 
 
 class ConsideredRecord(_Frozen):
-    """Every upstream record read for the charge, used or not, and why."""
+    """Every upstream record read for the charge and why it could or could not be used.
+    usable = in scope and inside the custody window; it is cited only if it also carries a
+    check that speaks to the charge."""
 
     record_id: str
     agent: str
     content_hash: str
-    used: bool
+    usable: bool
     reason: str
 
 

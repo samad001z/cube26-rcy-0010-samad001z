@@ -323,9 +323,8 @@ def _fire(
             Decision.REVIEW,
             None,
             "evidence_contradicts_charge",
-            f"every prep/label check passed before the fee was posted ({a.detail}); but the "
-            "line names no defect category, so the evidence cannot be shown to cover the "
-            "defect charged.",
+            f"{a.detail}; but the line names no defect category, so the evidence cannot be "
+            "shown to cover the defect charged.",
             NEXT_CONFIRM_CATEGORY,
         )
     if pre.filing.verdict == Verdict.FAIL:
@@ -480,7 +479,7 @@ def decide(
             record_id=c.record.record_id,
             agent=c.record.agent,
             content_hash=c.record.content_hash or "",
-            used=c.usable,
+            usable=c.usable,
             reason=c.reason,
         )
         for c in candidates

@@ -1,5 +1,6 @@
 import os
 from collections.abc import Iterator
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -12,11 +13,13 @@ from app.core.config import REPO_ROOT
 from app.db import repo
 from app.db.session import org_session
 from app.ingest.loader import IngestSummary, ingest_org
+from app.pipeline import run_org
 
 BACKEND = Path(__file__).resolve().parents[1]
 SECRET = "test-secret"
 ALPHA = "org_demo_alpha"
 BRAVO = "org_demo_bravo"
+AS_OF = date(2026, 9, 25)
 
 
 def _env(name: str) -> str:
@@ -73,4 +76,7 @@ def loaded(app_engine: Engine) -> dict[str, IngestSummary]:
             repo.insert_quarantined(
                 session, org, [Quarantined("bad.csv", 1, "unmapped value 'x'", {"line_id": "X"})]
             )
+    # Decide every charge through the real pipeline so the decisions table has rows per org.
+    for org in (ALPHA, BRAVO):
+        run_org(app_engine, org, AS_OF)
     return summaries

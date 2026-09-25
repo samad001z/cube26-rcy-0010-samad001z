@@ -390,5 +390,5 @@ def test_considered_records_list_every_relevant_record_with_reason():
     )
     by_id = {c.record_id: c for c in d.evidence_considered}
     assert set(by_id) == {"PRP-1", "PRP-2"}  # receiving is not relevant to this fee
-    assert by_id["PRP-1"].used and not by_id["PRP-2"].used
+    assert by_id["PRP-1"].usable and not by_id["PRP-2"].usable
     assert "fba_shipment_id differs" in by_id["PRP-2"].reason

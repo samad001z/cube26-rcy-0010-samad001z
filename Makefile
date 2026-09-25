@@ -6,7 +6,7 @@ export TEST_MIGRATION_DATABASE_URL ?= postgresql+psycopg://alibi_owner:local_dev
 export ATTACHMENT_KEY_SECRET ?= local-dev-attachment-secret
 export LLM_ENABLED ?= false
 
-.PHONY: install db-up db-down migrate lint fmt test dev
+.PHONY: install db-up db-down migrate lint fmt test dev run
 
 install:
 	cd backend && uv sync
@@ -31,3 +31,9 @@ test:
 
 dev:
 	cd backend && uv run uvicorn app.main:app --reload
+
+# Decide every sample line for one org: make run ORG=org_demo_alpha [AS_OF=2026-09-25]
+ORG ?= org_demo_alpha
+run:
+	cd backend && uv run alibi run --report ../data/fee_report_sample.csv \
+		--upstream ../data/upstream/ --org $(ORG) $(if $(AS_OF),--as-of $(AS_OF),)

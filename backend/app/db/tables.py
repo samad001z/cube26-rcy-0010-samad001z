@@ -88,3 +88,21 @@ audit_events = sa.Table(
     sa.Column("event_type", sa.Text),
     sa.Column("payload", pg.JSONB),
 )
+decisions = sa.Table(
+    "decisions",
+    metadata,
+    _id(),
+    sa.Column("organization_id", sa.Text),
+    sa.Column("run_id", pg.UUID(as_uuid=True)),
+    sa.Column("record_id", sa.Text),
+    sa.Column("line_id", sa.Text),
+    sa.Column("decision", sa.Text),
+    sa.Column("evidence_status", sa.Text),
+    sa.Column("reason_code", sa.Text),
+    sa.Column("rule_id", sa.Text),
+    sa.Column("status", sa.Text),
+    sa.Column("claim_amount", sa.Numeric(12, 2)),
+    sa.Column("content_hash", sa.Text),
+    sa.Column("body", pg.JSONB),
+    sa.Column("decided_at", sa.DateTime(timezone=True)),
+)

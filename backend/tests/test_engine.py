@@ -364,8 +364,8 @@ def _refund_line() -> Charge:
     )
 
 
-def _lost_line(**kw: object) -> Charge:
-    return charge(charge_type=ChargeType.LOST_INBOUND, amount="0.00", **kw)  # type: ignore[arg-type]
+def _lost_line(posted: date) -> Charge:
+    return charge(charge_type=ChargeType.LOST_INBOUND, amount="0.00", posted=posted)
 
 
 def _no_claim_steer(d: DecisionRecord) -> None:
@@ -409,6 +409,13 @@ def test_refund_returned_condition_uncertain_is_review_not_do_not_claim():
 def test_refund_returned_without_condition_recorded_is_not_complete():
     d = run(_refund_line(), [_returns(parts=None, condition=None)])
     assert d.decision == Decision.REVIEW and d.rule_id == "R_RETURNED_INCOMPLETE_OR_DAMAGED"
+
+
+def test_refund_returned_parts_not_recorded_is_not_complete():
+    # Identity and condition PASS, but parts_complete was not recorded: not "complete".
+    d = run(_refund_line(), [_returns(parts=None)])
+    assert d.decision == Decision.REVIEW and d.rule_id == "R_RETURNED_INCOMPLETE_OR_DAMAGED"
+    assert d.evidence_status == EvidenceStatus.CONTRADICTED
 
 
 def test_refund_wrong_item_returned_is_supported_review_until_amount():

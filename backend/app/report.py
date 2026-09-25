@@ -20,7 +20,7 @@ def render_decision(d: DecisionRecord) -> list[str]:
         f"{s.line_id}  {s.charge_type.value}  {amount}  ->  {d.decision.value} "
         f"({d.evidence_status.value})  {d.rule_id}"
         + (f" [{d.reason_code.value}]" if d.reason_code else "")
-        + f"  confidence {d.confidence}{claim}"
+        + f"  routing confidence {d.confidence}{claim}"
         + ("  STATUS PENDING" if d.status.value == "pending" else ""),
         f"  reason:   {d.reason}",
     ]

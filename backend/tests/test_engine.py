@@ -528,6 +528,24 @@ def test_weight_tier_without_measurements_is_review_no_relevant_evidence():
     assert "measured_weight" in (d.next_action or "")
 
 
+def test_no_relevant_evidence_leaves_the_custody_window_uncertain_not_pass():
+    # The prep record is in scope and inside the window, but carries no measurement.
+    c = charge(charge_type=ChargeType.FULFILMENT_FEE_WEIGHT_TIER, amount="4.25")
+    d = run(c, [prep_all_pass()])
+    assert _verdicts(d)["evidence_present"] == Verdict.FAIL
+    window = d.check("evidence_in_custody_window")
+    assert window.verdict == Verdict.UNCERTAIN
+    assert window.detail == "no relevant evidence to check"
+
+
+def test_no_in_scope_record_detail_says_there_is_nothing_to_check():
+    c = charge(charge_type=ChargeType.FULFILMENT_FEE_WEIGHT_TIER, amount="4.25")
+    d = run(c, [prep_all_pass(fba_shipment_id="FBA-OTHER")])
+    window = d.check("evidence_in_custody_window")
+    assert window.verdict == Verdict.UNCERTAIN
+    assert (window.detail or "").startswith("no relevant evidence to check")
+
+
 def test_weight_tier_with_measurements_but_no_fee_schedule_is_review():
     r = record(checks=[check("measured_weight", "PASS")])
     c = charge(charge_type=ChargeType.FULFILMENT_FEE_WEIGHT_TIER, amount="4.25")
@@ -688,3 +706,12 @@ def test_unknown_window_on_a_loss_event_keeps_the_warning_and_evidence_decides()
     assert d.rule_id == "R_RETURNED_INCOMPLETE_OR_DAMAGED"
     assert d.check("within_filing_window").verdict == Verdict.UNCERTAIN
     assert d.warnings == ["filing deadline not verified"]
+
+
+def test_cli_labels_the_decision_confidence_as_routing_confidence():
+    from app.report import render_decision
+
+    d = run(charge(defect_category="label"), [prep_all_pass()])
+    head = render_decision(d)[0]
+    assert f"routing confidence {d.confidence}" in head
+    assert " confidence " not in head.replace("routing confidence", "")

@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [project.scripts]
-alibi = "app.cli:app"
+alibi = "app.cli:main"
 
 [dependency-groups]
 dev = [

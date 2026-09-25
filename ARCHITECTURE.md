@@ -32,7 +32,7 @@ Configuration:
 | `not_already_reimbursed` | no, or partial, matching reimbursement | fully reimbursed, or the line is itself a reimbursement | a refund could belong to more than one fee |
 | `within_filing_window` | inside the sourced window | window not open yet ("not yet eligible"), or sourced deadline passed | no sourced deadline ("filing deadline not verified") |
 | `evidence_present` | a usable record speaks to the charge | nothing speaks to it | - |
-| `evidence_in_custody_window` | an in-scope record is inside the window | in-scope records exist, none inside | no in-scope record |
+| `evidence_in_custody_window` | an in-scope record that speaks to the charge is inside the window | in-scope records exist, none inside | no in-scope record, or none speaks to the charge ("no relevant evidence to check") |
 | `evidence_contradicts_charge` | CONTRADICTED | SUPPORTED | INSUFFICIENT or CONFLICTING |
 | `amount_computable` | full fee is the claim basis | the amount needs a unit value or an unsourced fee schedule | - |
 
@@ -82,9 +82,11 @@ Only the "until an amount is computable" rows suggest an override with an amount
 
 After the engine: `R_CITATION_INVALID` (validator) or `R_ENGINE_ERROR` (exception), both REVIEW with status `pending`.
 
-## Confidence (deterministic)
+## Routing confidence (deterministic)
 
-Confidence says how strongly the inputs determine a check's verdict. It comes from a fixed table in `config/engine.yaml`. It is never produced by a model.
+Each check carries a `confidence`, and the decision carries the confidence of its rule's key check. The CLI and UI label the decision's value **routing confidence**: how directly the ingested inputs determine the check the rule rests on, and so how firmly the line was routed to CLAIM, DO_NOT_CLAIM or REVIEW. It is not a probability that the decision is right, and not a probability that the channel accepts a claim. Measured accuracy comes only from the held-out, human-labelled eval set.
+
+It comes from a fixed table in `config/engine.yaml`. It is never produced by a model. The contract field keeps the name `confidence`.
 
 | source of the verdict | confidence |
 |---|---|
@@ -93,7 +95,7 @@ Confidence says how strongly the inputs determine a check's verdict. It comes fr
 | CONTRADICTED on `evidence_contradicts_charge` | 0.90 x unit coverage (e.g. 0.45 for 1 of 2 units) |
 | a charge that failed open | 0.00 |
 
-The decision's `confidence` is the confidence of its rule's key check (table above).
+The decision's routing confidence is the confidence of its rule's key check (table above). Example: 1.00 on `R_NO_RELEVANT_EVIDENCE` means "no record carries the data" was established by exact key comparison; it says nothing about whether the charge is recoverable.
 
 ## Decision record
 

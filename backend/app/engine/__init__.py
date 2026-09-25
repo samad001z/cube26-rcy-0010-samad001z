@@ -109,7 +109,9 @@ def _evidence_checks(
             "evidence_in_custody_window",
             Verdict.UNCERTAIN,
             exact,
-            "not applicable: no in-scope upstream record",
+            "no relevant evidence to check (no in-scope upstream record)"
+            if a.no_relevant
+            else "not applicable: no in-scope upstream record",
         )
     elif len(out_window) == len(in_scope):
         window = _check(
@@ -117,6 +119,14 @@ def _evidence_checks(
             Verdict.FAIL,
             exact,
             "; ".join(c.reason for c in out_window),
+        )
+    elif a.no_relevant:
+        # Records inside the window exist but none speaks to the charge: nothing to place.
+        window = _check(
+            "evidence_in_custody_window",
+            Verdict.UNCERTAIN,
+            exact,
+            "no relevant evidence to check",
         )
     else:
         skipped = f"; outside window: {', '.join(c.record.record_id for c in out_window)}"

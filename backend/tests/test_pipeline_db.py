@@ -92,26 +92,75 @@ def test_bravo_cannot_read_alpha_decisions_by_record_id(app_engine, loaded):
     assert n == 0
 
 
+LOSS_EVENT_RULES = {
+    # D-016 / D-017: every rule a loss event may end on. Never CLAIM (D-011).
+    "R_NO_RELEVANT_EVIDENCE": Decision.REVIEW,
+    "R_EVIDENCE_OUTSIDE_WINDOW": Decision.REVIEW,
+    "R_UNRESOLVED_UNIT": Decision.REVIEW,
+    "R_FILING_WINDOW_NOT_OPEN": Decision.REVIEW,
+    "R_CONFLICTING": Decision.REVIEW,
+    "R_INSUFFICIENT": Decision.REVIEW,
+    "R_AMOUNT_NOT_COMPUTABLE": Decision.REVIEW,
+    "R_LOSS_DOUBTFUL": Decision.REVIEW,
+    "R_RETURNED_INCOMPLETE_OR_DAMAGED": Decision.REVIEW,
+    "R_ITEM_RETURNED": Decision.DO_NOT_CLAIM,
+    "R_FILING_WINDOW_PASSED": Decision.DO_NOT_CLAIM,
+}
+# Charge types with no sourced filing deadline yet (D-017): these carry the warning.
+UNSOURCED_WINDOW_TYPES = {"inbound_defect_fee", "fulfilment_fee_weight_tier", "lost_inbound"}
+
+
 def test_sample_decisions_follow_the_approved_rules(app_engine, loaded):
     by_line = {d.subject.line_id: d for org in (ALPHA, BRAVO) for d in _latest_run(app_engine, org)}
     for d in by_line.values():
         ct = d.subject.charge_type.value
-        # D-011: loss events are never CLAIM; zero amounts are never CLAIM.
+        # D-011, D-016: loss events are never CLAIM and end only on the approved rules.
         if ct in ("lost_inbound", "damaged_in_warehouse", "refund_issued_item_not_returned"):
-            assert d.decision == Decision.REVIEW and d.rule_id in (
-                "R_AMOUNT_NOT_COMPUTABLE",
-                "R_NO_RELEVANT_EVIDENCE",
-            )
+            assert LOSS_EVENT_RULES.get(d.rule_id) == d.decision, (d.subject.line_id, d.rule_id)
         if ct == "fulfilment_fee_weight_tier":
             assert d.decision == Decision.REVIEW
         # Option C: the sample has no defect_category, so no inbound defect fee is CLAIM.
         if ct == "inbound_defect_fee":
             assert d.decision != Decision.CLAIM
-        # No sourced filing window yet: every decision carries the warning.
-        assert "filing deadline not verified" in d.warnings
+        # Only types with no sourced deadline carry the warning (D-014, D-017).
+        warned = "filing deadline not verified" in d.warnings
+        assert warned == (ct in UNSOURCED_WINDOW_TYPES), d.subject.line_id
     assert by_line["FEE-0014-1"].rule_id == "R_DEFECT_CATEGORY_MISSING"
     assert by_line["FEE-0035-1"].rule_id == "R_INSUFFICIENT"  # barcode uncertain
-    assert by_line["FEE-0064-1"].evidence_status.value == "CONFLICTING"
+    assert by_line["FEE-0064-1"].evidence_status.value == "CONTRADICTED"  # later sighting
+
+    def pinned(line: str) -> tuple[str, str, str, str | None]:
+        d = by_line[line]
+        code = d.reason_code.value if d.reason_code else None
+        return d.decision.value, d.evidence_status.value, d.rule_id, code
+
+    # Lost inbound: prep, then a customer return after the loss (D-016).
+    assert pinned("FEE-0014-2") == ("REVIEW", "CONTRADICTED", "R_LOSS_DOUBTFUL", None)
+    assert "loss is doubtful" in by_line["FEE-0014-2"].reason
+    # Lost inbound: prep only, no later record.
+    assert pinned("FEE-0031-1") == ("REVIEW", "SUPPORTED", "R_AMOUNT_NOT_COMPUTABLE", None)
+    # Refund, item returned: parts missing / damaged / condition uncertain.
+    for line in ("FEE-0038-2", "FEE-0041-2", "FEE-0014-4"):
+        assert pinned(line) == (
+            "REVIEW",
+            "CONTRADICTED",
+            "R_RETURNED_INCOMPLETE_OR_DAMAGED",
+            None,
+        ), line
+        assert "possible separate claim" in by_line[line].reason
+    # Refund, item returned complete: nothing owed for a non-return.
+    assert pinned("FEE-0048-2") == ("DO_NOT_CLAIM", "CONTRADICTED", "R_ITEM_RETURNED", None)
+    # Damaged in warehouse: sourced 60-day deadline passed (Q3 / D-016).
+    assert pinned("FEE-0071-2") == (
+        "DO_NOT_CLAIM",
+        "SUPPORTED",
+        "R_FILING_WINDOW_PASSED",
+        "FILING_WINDOW_EXPIRED",
+    )
+    assert (
+        "computed from the posted date as a proxy for the date the item was reported lost or "
+        "damaged" in by_line["FEE-0071-2"].reason
+    )
 
 
 # --- synthetic org: CLAIM through the DB, tamper detection, fail-open -----------------
@@ -331,20 +380,26 @@ def test_cli_rejects_a_bad_as_of_date(app_engine, loaded, monkeypatch):
 # decisions are right: correctness is measured only by the held-out, human-labelled eval
 # set (Day 3). The eval harness must never read this table. Any change must be explained
 # and re-approved by the human lead.
+# Re-approved 2026-09-25 after D-016 (loss-event mapping) and D-017 (sourced windows).
 SAMPLE_RULE_COUNTS = {
     ALPHA: {
         "R_NO_RELEVANT_EVIDENCE": 25,
-        "R_AMOUNT_NOT_COMPUTABLE": 8,
         "R_DEFECT_CATEGORY_MISSING": 6,
+        "R_RETURNED_INCOMPLETE_OR_DAMAGED": 3,
+        "R_AMOUNT_NOT_COMPUTABLE": 2,
+        "R_LOSS_DOUBTFUL": 2,
         "R_INSUFFICIENT": 1,
+        "R_FILING_WINDOW_PASSED": 1,
     },
     BRAVO: {
         "R_NO_RELEVANT_EVIDENCE": 17,
-        "R_AMOUNT_NOT_COMPUTABLE": 2,
         "R_DEFECT_CATEGORY_MISSING": 1,
         "R_INSUFFICIENT": 1,
+        "R_LOSS_DOUBTFUL": 1,
+        "R_ITEM_RETURNED": 1,
     },
 }
+SAMPLE_DO_NOT_CLAIM = {ALPHA: {"FEE-0071-2"}, BRAVO: {"FEE-0048-2"}}
 
 
 @pytest.mark.parametrize("org", [ALPHA, BRAVO])
@@ -352,7 +407,9 @@ def test_regression_snapshot_sample(app_engine, loaded, org):
     """Regression check on the sample; not ground truth, not an eval metric."""
     decisions = _latest_run(app_engine, org)
     assert dict(Counter(d.rule_id for d in decisions)) == SAMPLE_RULE_COUNTS[org]
-    assert all(d.decision == Decision.REVIEW for d in decisions)  # 0 CLAIM on the sample
+    assert not any(d.decision == Decision.CLAIM for d in decisions)  # 0 CLAIM on the sample
+    dnc = {d.subject.line_id for d in decisions if d.decision == Decision.DO_NOT_CLAIM}
+    assert dnc == SAMPLE_DO_NOT_CLAIM[org]
 
 
 def test_precheck_failure_fails_open_for_every_charge(app_engine, loaded, monkeypatch):

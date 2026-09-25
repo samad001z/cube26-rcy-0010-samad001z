@@ -12,7 +12,7 @@ from typing import Annotated
 
 import typer
 
-from app.core.config import get_settings
+from app.core.config import SettingsError, get_settings
 from app.core.rules import load_rules
 from app.db.session import get_engine
 from app.engine import DECIDED_BY
@@ -80,3 +80,12 @@ def run(
         typer.echo("")
     for line in render_summary(result.decisions):
         typer.echo(line)
+
+
+def main() -> None:
+    """Console entry point: configuration errors print one line instead of a traceback."""
+    try:
+        app()
+    except SettingsError as exc:
+        typer.echo(f"alibi: {exc}", err=True)
+        raise SystemExit(2) from None

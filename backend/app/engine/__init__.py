@@ -5,26 +5,35 @@ Rules are evaluated in order; the first that matches fires. Each rule names the 
 decision rests on, and the decision's confidence is that check's confidence.
 
   #   rule_id                    when                                          decision
-  1   R_FEE_REFUND_LINE          reimbursement line on a fee type              DO_NOT_CLAIM
-  2   R_ZERO_FEE                 fee line of 0.00                              DO_NOT_CLAIM
-  3   R_REIMBURSEMENT_AMBIGUOUS  a refund could belong to this or another fee  REVIEW
-  4   R_DUPLICATE                duplicate of an earlier fee line              CLAIM
-  5   R_ALREADY_REIMBURSED       reimbursed >= charged                         DO_NOT_CLAIM
-  6   R_UNRESOLVED_UNIT          unit resolution failed                        REVIEW
-  7   R_EVIDENCE_OUTSIDE_WINDOW  in-scope records, none in custody window      REVIEW
-  8   R_NO_RELEVANT_EVIDENCE     nothing can speak to the charge               REVIEW
-  9   R_AMOUNT_NOT_COMPUTABLE    loss event (D-011)                            REVIEW
-  10  R_CONFLICTING              records disagree                              REVIEW
-  11  R_SUPPORTED                evidence supports the charge                  DO_NOT_CLAIM
+  1   R_FILING_WINDOW_NOT_OPEN   sourced window has not opened yet (D-017)     REVIEW
+  2   R_FEE_REFUND_LINE          reimbursement line on a fee type              DO_NOT_CLAIM
+  3   R_ZERO_FEE                 fee line of 0.00                              DO_NOT_CLAIM
+  4   R_REIMBURSEMENT_AMBIGUOUS  a refund could belong to this or another fee  REVIEW
+  5   R_DUPLICATE                duplicate of an earlier fee line              CLAIM
+  6   R_ALREADY_REIMBURSED       reimbursed >= charged                         DO_NOT_CLAIM
+  7   R_UNRESOLVED_UNIT          unit resolution failed                        REVIEW
+  8   R_EVIDENCE_OUTSIDE_WINDOW  in-scope records, none in custody window      REVIEW
+  9   R_NO_RELEVANT_EVIDENCE     nothing can speak to the charge               REVIEW
+  Loss events only (D-016), never CLAIM:
+  10  R_FILING_WINDOW_PASSED     sourced deadline has passed                   DO_NOT_CLAIM
+  11  R_CONFLICTING              records disagree                              REVIEW
   12  R_INSUFFICIENT             evidence cannot settle it                     REVIEW
-  13  R_AMOUNT_NOT_COMPUTABLE    fee whose amount needs an unsourced rule      REVIEW
-  14  R_PARTIAL_COVERAGE         contradicted for some of the units            REVIEW
-  15  R_DEFECT_CATEGORY_MISSING  inbound defect fee names no category          REVIEW
-  16  R_FILING_WINDOW_PASSED     sourced deadline has passed                   DO_NOT_CLAIM
-  17  R_CONTRADICTED_FULL        contradicted for every unit                   CLAIM
+  13  (config row)               loss_event_outcomes[type][outcome]            REVIEW/DO_NOT_CLAIM
+        R_AMOUNT_NOT_COMPUTABLE, R_ITEM_RETURNED, R_RETURNED_INCOMPLETE_OR_DAMAGED,
+        R_LOSS_DOUBTFUL (see config/engine.yaml)
+  Fees only:
+  14  R_CONFLICTING              records disagree                              REVIEW
+  15  R_SUPPORTED                evidence supports the charge                  DO_NOT_CLAIM
+  16  R_INSUFFICIENT             evidence cannot settle it                     REVIEW
+  17  R_AMOUNT_NOT_COMPUTABLE    fee whose amount needs an unsourced rule      REVIEW
+  18  R_PARTIAL_COVERAGE         contradicted for some of the units            REVIEW
+  19  R_DEFECT_CATEGORY_MISSING  inbound defect fee names no category          REVIEW
+  20  R_FILING_WINDOW_PASSED     sourced deadline has passed                   DO_NOT_CLAIM
+  21  R_CONTRADICTED_FULL        contradicted for every unit                   CLAIM
 
-A duplicate (rule 4) is still subject to rules 5 and 16: fully reimbursed -> rule 5; a
-passed deadline -> DO_NOT_CLAIM with FILING_WINDOW_EXPIRED (D-015a). An unverified
+A window that has not opened (rule 1) is REVIEW, never CLAIM or DO_NOT_CLAIM (D-017). A
+duplicate (rule 5) is still subject to rule 6 and the deadline: fully reimbursed -> rule 6;
+a passed deadline -> DO_NOT_CLAIM with FILING_WINDOW_EXPIRED (D-015a). An unverified
 deadline never blocks a CLAIM; it adds the warning "filing deadline not verified" (D-014).
 """
 
@@ -34,7 +43,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from app.claims import compute_full_amount_claim
-from app.core.rules import ChannelRules, EngineConfig
+from app.core.rules import ChannelRules, EngineConfig, LossEventMapping
 from app.engine.assess import Assessment, assess
 from app.models.charge import Charge
 from app.models.contract import Check, Outcome
@@ -50,7 +59,7 @@ from app.precheck import FILING_NOT_VERIFIED, Precheck, is_fee_refund_line
 from app.resolution import Resolution
 from app.retrieval import Candidate
 
-ENGINE_VERSION = "0.2.0"
+ENGINE_VERSION = "0.3.0"
 DECIDED_BY = f"rules@{ENGINE_VERSION}"
 ZERO = Decimal("0.00")
 
@@ -100,7 +109,9 @@ def _evidence_checks(
             "evidence_in_custody_window",
             Verdict.UNCERTAIN,
             exact,
-            "not applicable: no in-scope upstream record",
+            "no relevant evidence to check (no in-scope upstream record)"
+            if a.no_relevant
+            else "not applicable: no in-scope upstream record",
         )
     elif len(out_window) == len(in_scope):
         window = _check(
@@ -108,6 +119,14 @@ def _evidence_checks(
             Verdict.FAIL,
             exact,
             "; ".join(c.reason for c in out_window),
+        )
+    elif a.no_relevant:
+        # Records inside the window exist but none speaks to the charge: nothing to place.
+        window = _check(
+            "evidence_in_custody_window",
+            Verdict.UNCERTAIN,
+            exact,
+            "no relevant evidence to check",
         )
     else:
         skipped = f"; outside window: {', '.join(c.record.record_id for c in out_window)}"
@@ -211,6 +230,17 @@ def _fire(
     cfg: EngineConfig,
 ) -> Fired:
     kind = cfg.charge_types[charge.charge_type].kind
+    if pre.filing.state == "not_open":
+        assert pre.filing.opens is not None
+        return Fired(
+            "R_FILING_WINDOW_NOT_OPEN",
+            Decision.REVIEW,
+            ReasonCode.FILING_WINDOW_NOT_OPEN,
+            "within_filing_window",
+            "the filing window has not opened yet, so this can be neither claimed nor "
+            f"dismissed ({pre.filing.proxy_note}): {pre.filing.detail}.",
+            f"Re-run on or after {pre.filing.opens}, when the filing window opens.",
+        )
     if is_fee_refund_line(charge, cfg):
         return Fired(
             "R_FEE_REFUND_LINE",
@@ -244,7 +274,7 @@ def _fire(
     cap = charge.amount - pre.reimbursed_amount
     if pre.duplicate_of is not None and cap > ZERO:
         c = pre.duplicate_of
-        if pre.filing.verdict == Verdict.FAIL:
+        if pre.filing.state == "passed":
             return Fired(
                 "R_FILING_WINDOW_PASSED",
                 Decision.DO_NOT_CLAIM,
@@ -291,25 +321,19 @@ def _fire(
             "window: " + "; ".join(c.reason for c in in_scope) + ".",
             "Find evidence captured inside the custody window, or review manually.",
         )
+    loss = cfg.loss_event_outcomes.get(charge.charge_type) if kind == "loss_event" else None
     if a.no_relevant:
+        note = f"; {loss.no_evidence}" if loss is not None and loss.no_evidence else ""
         return Fired(
             "R_NO_RELEVANT_EVIDENCE",
             Decision.REVIEW,
             ReasonCode.NO_RELEVANT_EVIDENCE,
             "evidence_present",
-            f"no upstream evidence speaks to this charge: {a.detail}.",
+            f"no upstream evidence speaks to this charge: {a.detail}{note}.",
             _no_evidence_action(charge, cfg),
         )
-    if amount_why is not None and kind == "loss_event":
-        return Fired(
-            "R_AMOUNT_NOT_COMPUTABLE",
-            Decision.REVIEW,
-            None,
-            "amount_computable",
-            f"evidence is {a.status.value} ({a.detail}); but no claim amount can be "
-            f"computed: {amount_why}.",
-            NEXT_UNIT_VALUE,
-        )
+    if loss is not None:
+        return _fire_loss_event(pre, a, loss)
     if a.status == EvidenceStatus.CONFLICTING:
         return Fired(
             "R_CONFLICTING",
@@ -367,7 +391,7 @@ def _fire(
             "shown to cover the defect charged.",
             NEXT_CONFIRM_CATEGORY,
         )
-    if pre.filing.verdict == Verdict.FAIL:
+    if pre.filing.state == "passed":
         return Fired(
             "R_FILING_WINDOW_PASSED",
             Decision.DO_NOT_CLAIM,
@@ -384,6 +408,62 @@ def _fire(
         f"upstream evidence contradicts the charge: {a.detail}"
         + (f" [{a.scope_note}]" if a.scope_note else "")
         + ".",
+    )
+
+
+def _fire_loss_event(pre: Precheck, a: Assessment, loss: LossEventMapping) -> Fired:
+    """Loss events (D-016): a passed sourced deadline, then generic INSUFFICIENT/CONFLICTING,
+    then the per-charge-type row of config loss_event_outcomes. Never CLAIM (D-011)."""
+    if pre.filing.state == "passed":
+        return Fired(
+            "R_FILING_WINDOW_PASSED",
+            Decision.DO_NOT_CLAIM,
+            ReasonCode.FILING_WINDOW_EXPIRED,
+            "within_filing_window",
+            f"evidence is {a.status.value} ({a.detail}); but the filing deadline has passed, "
+            f"{pre.filing.proxy_note}: {pre.filing.detail}.",
+        )
+    if a.status == EvidenceStatus.CONFLICTING:
+        return Fired(
+            "R_CONFLICTING",
+            Decision.REVIEW,
+            None,
+            "evidence_contradicts_charge",
+            f"upstream evidence conflicts: {a.detail}.",
+            "Inspect the conflicting records and their photos, then decide.",
+        )
+    if a.status == EvidenceStatus.INSUFFICIENT:
+        return Fired(
+            "R_INSUFFICIENT",
+            Decision.REVIEW,
+            None,
+            "evidence_contradicts_charge",
+            f"evidence is insufficient: {a.detail}.",
+            "Check the uncertain items (photos, operator notes) and decide.",
+        )
+    row = loss.outcomes.get(a.outcome or "")
+    if row is None or row.evidence_status != a.status.value:
+        raise ValueError(f"no loss_event_outcomes row {a.outcome!r} for evidence {a.status.value}")
+    if row.amount_needed:
+        why = (
+            "what is owed needs an authoritative unit value, which no upstream record "
+            "provides (D-011)"
+        )
+        return Fired(
+            row.rule_id,
+            Decision.REVIEW,
+            None,
+            "amount_computable",
+            f"{row.reason} ({a.detail}); but no claim amount can be computed: {why}.",
+            NEXT_UNIT_VALUE,
+        )
+    return Fired(
+        row.rule_id,
+        Decision(row.decision),
+        None,
+        "evidence_contradicts_charge",
+        f"{row.reason}: {a.detail}.",
+        row.next_action,
     )
 
 

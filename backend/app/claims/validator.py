@@ -102,6 +102,8 @@ def validate(
                 errors.append(f"claim {claim.amount} exceeds charged - reimbursed = {cap}")
         if not any(c.role in ("contradicts", "canonical_charge") for c in decision.citations):
             errors.append("CLAIM cites no contradicting evidence or canonical charge")
+        if cfg.charge_types[charge.charge_type].kind == "loss_event":
+            errors.append("a loss event is never CLAIM (D-011, D-016)")
     elif claim is not None:
         errors.append(f"{decision.decision.value} carries a claim amount")
 

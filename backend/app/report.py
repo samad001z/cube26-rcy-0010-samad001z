@@ -3,7 +3,7 @@
 from collections import Counter
 from decimal import Decimal
 
-from app.core.rules import ChannelRules
+from app.core.rules import ChannelRules, FilingWindowRule, RuleValue
 from app.models.decision import DecisionRecord
 from app.models.vocab import Decision
 
@@ -20,7 +20,7 @@ def render_decision(d: DecisionRecord) -> list[str]:
         f"{s.line_id}  {s.charge_type.value}  {amount}  ->  {d.decision.value} "
         f"({d.evidence_status.value})  {d.rule_id}"
         + (f" [{d.reason_code.value}]" if d.reason_code else "")
-        + f"  confidence {d.confidence}{claim}"
+        + f"  routing confidence {d.confidence}{claim}"
         + ("  STATUS PENDING" if d.status.value == "pending" else ""),
         f"  reason:   {d.reason}",
     ]
@@ -67,7 +67,10 @@ def render_summary(decisions: list[DecisionRecord]) -> list[str]:
 
 
 def rules_status(rules: ChannelRules) -> str:
-    values = [*rules.filing_window_days.values(), rules.fulfilment_fee_schedule]
+    values: list[FilingWindowRule | RuleValue] = [
+        *rules.filing_windows.values(),
+        rules.fulfilment_fee_schedule,
+    ]
     sourced = sum(1 for v in values if v.verified)
     return (
         f"channel rules {rules.channel}: {sourced} of {len(values)} values sourced "

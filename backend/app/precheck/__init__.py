@@ -9,8 +9,11 @@
   group, it is applied to the duplicates first (latest first), then the canonical line.
   If it could belong to more than one fee otherwise, it is not allocated: every candidate
   fee is flagged ambiguous and goes to REVIEW.
-- Filing window: deadline = posted date + the sourced window from config/rules/. With no
-  sourced window the verdict is UNCERTAIN ("filing deadline not verified").
+- Filing window: the window opens at posted date + window_open_days and closes at posted
+  date + window_close_days, both sourced in config/rules/ (the posted date is a proxy for
+  the event date the source counts from). Before it opens: FAIL, "not yet eligible". After
+  it closes: FAIL. With no sourced close the verdict is UNCERTAIN ("filing deadline not
+  verified").
 """
 
 from collections import defaultdict
@@ -18,6 +21,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal
+from typing import Literal
 
 from app.core.rules import ChannelRules, EngineConfig
 from app.models.charge import Charge
@@ -25,15 +29,25 @@ from app.models.vocab import ReportType, Verdict
 
 ZERO = Decimal("0.00")
 FILING_NOT_VERIFIED = "filing deadline not verified"
+NOT_YET_ELIGIBLE = "not yet eligible"
+
+FilingState = Literal["unknown", "not_open", "open", "passed"]
 
 
 @dataclass(frozen=True)
 class FilingWindow:
+    state: FilingState
     verdict: Verdict
+    opens: date | None
     deadline: date | None
-    window_days: int | None
     source_url: str | None
     detail: str
+    # The event the sourced window counts from; the posted date stands in for it.
+    anchor: str | None = None
+
+    @property
+    def proxy_note(self) -> str:
+        return f"computed from the posted date as a proxy for the {self.anchor or 'event date'}"
 
 
 @dataclass(frozen=True)
@@ -156,27 +170,47 @@ def match_reimbursements(charges: Sequence[Charge], cfg: EngineConfig) -> Reimbu
 
 
 def filing_window(charge: Charge, rules: ChannelRules, as_of: date) -> FilingWindow:
-    rule = rules.filing_window_days[charge.charge_type]
-    if rule.value is None:
+    rule = rules.filing_windows[charge.charge_type]
+    posted = charge.posted_date
+    source = f"(source: {rule.source_url})"
+    if rule.window_open_days is not None:
+        opens = posted + timedelta(days=rule.window_open_days)
+        if as_of < opens:
+            return FilingWindow(
+                "not_open",
+                Verdict.FAIL,
+                opens,
+                None,
+                rule.source_url,
+                f"{NOT_YET_ELIGIBLE}: posted {posted} + {rule.window_open_days} days = window "
+                f"opens {opens}; as of {as_of} a claim cannot be filed yet {source}",
+                rule.anchor,
+            )
+        opened = f"window opened {opens} (posted {posted} + {rule.window_open_days} days); "
+    else:
+        opens, opened = None, ""
+    if rule.window_close_days is None:
         return FilingWindow(
+            "unknown",
             Verdict.UNCERTAIN,
+            opens,
             None,
-            None,
-            None,
-            f"{FILING_NOT_VERIFIED}: no sourced filing window for {charge.charge_type.value} "
-            "in config/rules/",
+            rule.source_url,
+            f"{opened}{FILING_NOT_VERIFIED}: no sourced filing deadline for "
+            f"{charge.charge_type.value} in config/rules/",
+            rule.anchor,
         )
-    assert isinstance(rule.value, int)
-    deadline = charge.posted_date + timedelta(days=rule.value)
-    verdict = Verdict.FAIL if as_of > deadline else Verdict.PASS
-    state = "passed" if verdict == Verdict.FAIL else "open"
+    deadline = posted + timedelta(days=rule.window_close_days)
+    passed = as_of > deadline
     return FilingWindow(
-        verdict,
+        "passed" if passed else "open",
+        Verdict.FAIL if passed else Verdict.PASS,
+        opens,
         deadline,
-        rule.value,
         rule.source_url,
-        f"posted {charge.posted_date} + {rule.value} days = deadline {deadline}; "
-        f"as of {as_of} the window is {state} (source: {rule.source_url})",
+        f"{opened}posted {posted} + {rule.window_close_days} days = deadline {deadline}; "
+        f"as of {as_of} the window is {'passed' if passed else 'open'} {source}",
+        rule.anchor,
     )
 
 

@@ -26,6 +26,7 @@ class ReasonCode(StrEnum):
     DEPENDENCY_UNAVAILABLE = "DEPENDENCY_UNAVAILABLE"  # database or other dependency failed
     ENGINE_ERROR = "ENGINE_ERROR"  # the rule engine raised on this charge
     FILING_WINDOW_EXPIRED = "FILING_WINDOW_EXPIRED"  # sourced deadline known and passed
+    FILING_WINDOW_NOT_OPEN = "FILING_WINDOW_NOT_OPEN"  # sourced window not yet open
 
 
 class RecordStatus(StrEnum):

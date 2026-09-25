@@ -1,0 +1,140 @@
+from datetime import date
+from decimal import Decimal
+
+from app.core.rules import load_engine_config, load_rules, parse_rules
+from app.models.charge import Charge
+from app.models.vocab import ChargeType, ReportType, Verdict
+from app.precheck import (
+    filing_window,
+    find_duplicates,
+    match_reimbursements,
+    run_prechecks,
+)
+from tests.factories import charge
+from tests.test_rules_config import SOURCED, _rules
+
+CFG = load_engine_config()
+RULES = load_rules()
+
+
+# --- duplicates ------------------------------------------------------------------------
+
+
+def test_identical_fee_lines_within_window_later_one_is_duplicate():
+    a = charge("L-1", posted=date(2026, 7, 1))
+    b = charge("L-2", posted=date(2026, 7, 10))
+    dups = find_duplicates([b, a], CFG)
+    assert dups == {"L-2": a}
+
+
+def test_same_day_duplicates_use_line_id_order():
+    a = charge("L-1")
+    b = charge("L-2")
+    assert find_duplicates([b, a], CFG) == {"L-2": a}
+
+
+def test_outside_window_is_not_a_duplicate():
+    a = charge("L-1", posted=date(2026, 5, 1))
+    b = charge("L-2", posted=date(2026, 7, 1))
+    assert find_duplicates([a, b], CFG) == {}
+
+
+def test_any_differing_key_means_not_duplicate():
+    base = charge("L-1")
+    for other in (
+        charge("L-2", amount="2.01"),
+        charge("L-2", unit_id="U-2"),
+        charge("L-2", quantity=2),
+        charge("L-2", fba_shipment_id="FBA-2"),
+        charge("L-2", charge_type=ChargeType.FULFILMENT_FEE_WEIGHT_TIER),
+    ):
+        assert find_duplicates([base, other], CFG) == {}
+
+
+def test_zero_amount_and_loss_events_are_never_duplicates():
+    z1, z2 = charge("L-1", amount="0.00"), charge("L-2", amount="0.00")
+    l1 = charge("L-3", charge_type=ChargeType.LOST_INBOUND, amount="0.00")
+    l2 = charge("L-4", charge_type=ChargeType.LOST_INBOUND, amount="0.00")
+    assert find_duplicates([z1, z2, l1, l2], CFG) == {}
+
+
+def test_triplicate_points_every_copy_at_the_first():
+    a, b, c = charge("L-1"), charge("L-2"), charge("L-3")
+    assert find_duplicates([c, b, a], CFG) == {"L-2": a, "L-3": a}
+
+
+# --- already reimbursed ---------------------------------------------------------------
+
+
+def _refund(line_id: str, amount: str, **kw) -> Charge:
+    return charge(line_id, report_type=ReportType.REIMBURSEMENT_REPORT, amount=amount, **kw)
+
+
+def test_refund_on_same_unit_and_type_offsets_the_fee():
+    fee = charge("L-1", posted=date(2026, 7, 1))
+    r = _refund("R-1", "2.00", posted=date(2026, 7, 5))
+    assert match_reimbursements([fee, r], CFG) == {"L-1": (r,)}
+
+
+def test_refund_is_allocated_once_to_the_earliest_fee():
+    f1 = charge("L-1", posted=date(2026, 7, 1))
+    f2 = charge("L-2", posted=date(2026, 7, 2), amount="3.00")
+    r = _refund("R-1", "2.00", posted=date(2026, 7, 5))
+    assert match_reimbursements([f2, f1, r], CFG) == {"L-1": (r,)}
+
+
+def test_refund_before_the_fee_other_unit_or_type_does_not_match():
+    fee = charge("L-1", posted=date(2026, 7, 10))
+    early = _refund("R-1", "2.00", posted=date(2026, 7, 1))
+    other_unit = _refund("R-2", "2.00", unit_id="U-9", posted=date(2026, 7, 11))
+    other_type = _refund(
+        "R-3",
+        "2.00",
+        charge_type=ChargeType.FULFILMENT_FEE_WEIGHT_TIER,
+        posted=date(2026, 7, 11),
+    )
+    assert match_reimbursements([fee, early, other_unit, other_type], CFG) == {}
+
+
+def test_loss_event_reimbursement_never_offsets_a_fee():
+    fee = charge("L-1", posted=date(2026, 6, 1))
+    paid = _refund(
+        "R-1", "14.00", charge_type=ChargeType.DAMAGED_IN_WAREHOUSE, posted=date(2026, 6, 27)
+    )
+    assert match_reimbursements([fee, paid], CFG) == {}
+
+
+def test_run_prechecks_sums_reimbursed_amount_as_decimal():
+    fee = charge("L-1", amount="5.00", posted=date(2026, 7, 1))
+    r1 = _refund("R-1", "1.25", posted=date(2026, 7, 2))
+    r2 = _refund("R-2", "0.75", posted=date(2026, 7, 3))
+    pre = run_prechecks([fee, r1, r2], RULES, CFG, date(2026, 9, 25))
+    assert pre["L-1"].reimbursed_amount == Decimal("2.00")
+    assert [r.line_id for r in pre["L-1"].reimbursements] == ["R-1", "R-2"]
+    assert pre["R-1"].reimbursed_amount == Decimal("0.00")
+
+
+# --- filing window --------------------------------------------------------------------
+
+
+def _rules_with_window(days: int):
+    data = _rules()
+    data["filing_window_days"]["inbound_defect_fee"] = {**SOURCED, "value": days}
+    return parse_rules(data)
+
+
+def test_unknown_window_is_uncertain_with_the_warning_text():
+    fw = filing_window(charge(), RULES, date(2026, 9, 25))
+    assert fw.verdict == Verdict.UNCERTAIN
+    assert fw.deadline is None
+    assert "filing deadline not verified" in fw.detail
+
+
+def test_known_window_open_and_passed():
+    rules = _rules_with_window(30)
+    c = charge(posted=date(2026, 7, 18))
+    open_ = filing_window(c, rules, date(2026, 8, 17))
+    assert open_.verdict == Verdict.PASS and open_.deadline == date(2026, 8, 17)
+    passed = filing_window(c, rules, date(2026, 8, 18))
+    assert passed.verdict == Verdict.FAIL
+    assert "https://example.org/help/page" in passed.detail

@@ -392,3 +392,76 @@ def test_considered_records_list_every_relevant_record_with_reason():
     assert set(by_id) == {"PRP-1", "PRP-2"}  # receiving is not relevant to this fee
     assert by_id["PRP-1"].usable and not by_id["PRP-2"].usable
     assert "fba_shipment_id differs" in by_id["PRP-2"].reason
+
+
+# --- reimbursement matching (rules review M1, M2) --------------------------------------
+
+
+def _refund(line_id: str, amount: str, posted: date, **kw) -> Charge:
+    return charge(
+        line_id, report_type=ReportType.REIMBURSEMENT_REPORT, amount=amount, posted=posted, **kw
+    )
+
+
+def test_refund_after_a_duplicate_is_applied_to_the_duplicate_not_claimed_again():
+    f1 = charge("F1", posted=date(2026, 7, 18), defect_category="label")
+    f2 = charge("F2", posted=date(2026, 7, 19), defect_category="label")
+    r1 = _refund("R1", "2.00", date(2026, 7, 25))
+    d2 = run(f2, [prep_all_pass()], others=[f1, r1])
+    assert d2.decision == Decision.DO_NOT_CLAIM
+    assert d2.reason_code == ReasonCode.ALREADY_REIMBURSED
+    # the canonical charge is judged on its own evidence, not treated as refunded
+    d1 = run(f1, [prep_all_pass()], others=[f2, r1])
+    assert d1.amount_reimbursed == Decimal("0.00")
+    assert d1.decision == Decision.CLAIM
+
+
+def test_refund_on_another_shipment_does_not_offset_this_fee():
+    f1 = charge("F1", posted=date(2026, 7, 1), fba_shipment_id="FBA-1", defect_category="label")
+    f2 = charge("F2", posted=date(2026, 8, 20), fba_shipment_id="FBA-2", defect_category="label")
+    r2 = _refund("R2", "2.00", date(2026, 8, 25), fba_shipment_id="FBA-2")
+    recs = [
+        prep_all_pass("PRP-1"),
+        prep_all_pass("PRP-2", fba_shipment_id="FBA-2", captured=datetime(2026, 8, 1, tzinfo=UTC)),
+    ]
+    d1 = run(f1, recs, others=[f2, r2])
+    d2 = run(f2, recs, others=[f1, r2])
+    assert d1.amount_reimbursed == Decimal("0.00") and d1.decision == Decision.CLAIM
+    assert d2.decision == Decision.DO_NOT_CLAIM
+    assert d2.reason_code == ReasonCode.ALREADY_REIMBURSED
+
+
+def test_refund_that_could_belong_to_two_fees_sends_both_to_review():
+    f1 = charge("F1", posted=date(2026, 7, 1), fba_shipment_id="FBA-1", defect_category="label")
+    f2 = charge("F2", posted=date(2026, 7, 2), fba_shipment_id="FBA-2", defect_category="label")
+    r = _refund("R1", "2.00", date(2026, 7, 25), fba_shipment_id=None)
+    recs = [prep_all_pass("PRP-1"), prep_all_pass("PRP-2", fba_shipment_id="FBA-2")]
+    for fee in (f1, f2):
+        d = run(fee, recs, others=[f1, f2, r])
+        assert d.decision == Decision.REVIEW, fee.line_id
+        assert d.rule_id == "R_REIMBURSEMENT_AMBIGUOUS"
+        assert d.check("not_already_reimbursed").verdict == Verdict.UNCERTAIN
+        assert "R1" in d.reason
+
+
+def test_a_refund_offsets_at_most_its_own_amount():
+    fee = charge("F1", amount="5.00", posted=date(2026, 7, 1), defect_category="label")
+    r = _refund("R1", "2.00", date(2026, 7, 5))
+    d = run(fee, [prep_all_pass()], others=[r])
+    assert d.amount_reimbursed == Decimal("2.00")
+    assert d.claim is not None and d.claim.amount == Decimal("3.00")
+
+
+def test_refund_larger_than_the_fee_offsets_only_the_fee():
+    fee = charge("F1", amount="2.00", posted=date(2026, 7, 1), defect_category="label")
+    r = _refund("R1", "5.00", date(2026, 7, 5))
+    d = run(fee, [prep_all_pass()], others=[r])
+    assert d.amount_reimbursed == Decimal("2.00")
+    assert d.decision == Decision.DO_NOT_CLAIM
+
+
+def test_overridden_prep_record_cannot_contradict():
+    r = prep_all_pass(status=RecordStatus.OVERRIDDEN)
+    d = run(charge(defect_category="label"), [r])
+    assert d.decision == Decision.REVIEW and d.evidence_status == EvidenceStatus.INSUFFICIENT
+    assert "record status overridden" in d.reason

@@ -59,6 +59,11 @@ def _scope(charge: Charge, record: EvidenceRecord, rel: PodRelevance) -> str | N
     return None
 
 
+def in_scope(charge: Charge, record: EvidenceRecord, cfg: EngineConfig) -> bool:
+    rel = cfg.charge_types[charge.charge_type].pods.get(record.agent)  # type: ignore[call-overload]
+    return rel is not None and _scope(charge, record, rel) is None
+
+
 def in_custody_window(charge: Charge, record: EvidenceRecord, cfg: EngineConfig) -> bool:
     rel = cfg.charge_types[charge.charge_type].pods.get(record.agent)  # type: ignore[call-overload]
     if rel is None:

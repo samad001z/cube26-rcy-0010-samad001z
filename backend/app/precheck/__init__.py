@@ -2,9 +2,13 @@
 
 - Duplicate: a fee line whose fingerprint matches an earlier line posted within the
   configured window. The earliest is canonical; the later one is the duplicate (D-003).
-- Already reimbursed (heuristic): a `reimbursement_report` line for a fee charge type on
-  the same unit, posted on or after the fee, offsets that fee. Each reimbursement line is
-  allocated to one fee only, earliest fee first.
+- Already reimbursed (heuristic): a `reimbursement_report` line for a fee charge type can
+  offset a fee on the same unit and charge type posted on or before it, when their
+  shipment and order agree wherever both carry one. A refund offsets at most its own
+  amount and at most what is left of each fee. If its candidate fees are one duplicate
+  group, it is applied to the duplicates first (latest first), then the canonical line.
+  If it could belong to more than one fee otherwise, it is not allocated: every candidate
+  fee is flagged ambiguous and goes to REVIEW.
 - Filing window: deadline = posted date + the sourced window from config/rules/. With no
   sourced window the verdict is UNCERTAIN ("filing deadline not verified").
 """
@@ -38,6 +42,8 @@ class Precheck:
     reimbursements: tuple[Charge, ...]
     reimbursed_amount: Decimal
     filing: FilingWindow
+    # Refund lines that could belong to this fee or to another one; nothing allocated.
+    ambiguous_reimbursements: tuple[Charge, ...] = ()
 
 
 def is_fee(charge: Charge, cfg: EngineConfig) -> bool:
@@ -91,30 +97,62 @@ def find_duplicates(charges: Sequence[Charge], cfg: EngineConfig) -> dict[str, C
     return result
 
 
-def match_reimbursements(
-    charges: Sequence[Charge], cfg: EngineConfig
-) -> dict[str, tuple[Charge, ...]]:
-    """fee line_id -> reimbursement lines allocated to it (heuristic, see module doc)."""
+def _refund_matches(refund: Charge, fee: Charge) -> bool:
+    if (
+        refund.organization_id != fee.organization_id
+        or refund.unit_id != fee.unit_id
+        or refund.charge_type != fee.charge_type
+        or refund.currency != fee.currency
+        or refund.posted_date < fee.posted_date
+    ):
+        return False
+    for key in ("fba_shipment_id", "order_id"):
+        ours, theirs = getattr(fee, key), getattr(refund, key)
+        if ours is not None and theirs is not None and ours != theirs:
+            return False
+    return True
+
+
+@dataclass(frozen=True)
+class Reimbursements:
+    allocated: dict[str, tuple[tuple[Charge, Decimal], ...]]  # fee line_id -> (refund, amount)
+    ambiguous: dict[str, tuple[Charge, ...]]  # fee line_id -> refunds not allocated
+
+
+def match_reimbursements(charges: Sequence[Charge], cfg: EngineConfig) -> Reimbursements:
+    """Allocate refund lines to fees (heuristic, see module doc)."""
+    dups = find_duplicates(charges, cfg)
     refunds = sorted((c for c in charges if is_fee_refund_line(c, cfg)), key=_order)
     fees = sorted((c for c in charges if _is_chargeable_fee(c, cfg)), key=_order)
-    used: set[str] = set()
-    result: dict[str, tuple[Charge, ...]] = {}
-    for fee in fees:
-        matched = []
-        for r in refunds:
-            if (
-                r.line_id not in used
-                and r.organization_id == fee.organization_id
-                and r.unit_id == fee.unit_id
-                and r.charge_type == fee.charge_type
-                and r.currency == fee.currency
-                and r.posted_date >= fee.posted_date
-            ):
-                matched.append(r)
-                used.add(r.line_id)
-        if matched:
-            result[fee.line_id] = tuple(matched)
-    return result
+    group = {f.line_id: (dups[f.line_id].line_id if f.line_id in dups else f.line_id) for f in fees}
+    remaining = {f.line_id: f.amount for f in fees}
+    allocated: dict[str, list[tuple[Charge, Decimal]]] = defaultdict(list)
+    ambiguous: dict[str, list[Charge]] = defaultdict(list)
+    for r in refunds:
+        candidates = [f for f in fees if _refund_matches(r, f)]
+        if not candidates:
+            continue
+        if len({group[f.line_id] for f in candidates}) > 1:
+            for f in candidates:
+                ambiguous[f.line_id].append(r)
+            continue
+        # One duplicate group: duplicates (latest first) before the canonical line.
+        canonical = [f for f in candidates if f.line_id == group[f.line_id]]
+        duplicates = sorted((f for f in candidates if f.line_id != group[f.line_id]), key=_order)
+        ordered = [*reversed(duplicates), *canonical]
+        left = r.amount
+        for f in ordered:
+            take = min(left, remaining[f.line_id])
+            if take > ZERO:
+                allocated[f.line_id].append((r, take))
+                remaining[f.line_id] -= take
+                left -= take
+            if left <= ZERO:
+                break
+    return Reimbursements(
+        {k: tuple(v) for k, v in allocated.items()},
+        {k: tuple(v) for k, v in ambiguous.items()},
+    )
 
 
 def filing_window(charge: Charge, rules: ChannelRules, as_of: date) -> FilingWindow:
@@ -149,11 +187,12 @@ def run_prechecks(
     reimb = match_reimbursements(charges, cfg)
     out: dict[str, Precheck] = {}
     for c in charges:
-        lines = reimb.get(c.line_id, ())
+        alloc = reimb.allocated.get(c.line_id, ())
         out[c.line_id] = Precheck(
             duplicate_of=dups.get(c.line_id),
-            reimbursements=lines,
-            reimbursed_amount=sum((r.amount for r in lines), ZERO),
+            reimbursements=tuple(r for r, _ in alloc),
+            reimbursed_amount=sum((amt for _, amt in alloc), ZERO),
             filing=filing_window(c, rules, as_of),
+            ambiguous_reimbursements=reimb.ambiguous.get(c.line_id, ()),
         )
     return out

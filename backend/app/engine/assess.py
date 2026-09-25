@@ -57,7 +57,8 @@ def _fmt(verdicts: dict[str, Verdict]) -> str:
 
 
 def _pending(record: EvidenceRecord) -> bool:
-    return record.status == RecordStatus.PENDING
+    """Only final records can settle a charge; pending or overridden ones are uncertain."""
+    return record.status != RecordStatus.FINAL
 
 
 def assess_inbound_defect(
@@ -93,7 +94,7 @@ def assess_inbound_defect(
             pol = "supports"
         else:
             pol = "contradicts"
-        note = " (record pending review)" if _pending(r) else ""
+        note = f" (record status {r.status.value})" if _pending(r) else ""
         findings.append(Finding(r, tuple(sorted(v)), pol, f"{r.record_id}: {_fmt(v)}{note}"))
 
     if not findings:

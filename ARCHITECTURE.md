@@ -17,7 +17,7 @@ alibi run --report ... --upstream ... --org ...
     persist + audit        decisions row (append-only), DECISION audit event
 ```
 
-If deciding one charge raises, that charge is still persisted as REVIEW with status `pending` (rule `R_ENGINE_ERROR`), inside a savepoint so the rest of the run continues.
+If deciding one charge raises, that charge is still persisted as REVIEW with status `pending` (rule `R_ENGINE_ERROR`; `reason_code` `MODEL_UNAVAILABLE` if a dependency such as the database failed), inside a savepoint so the rest of the run continues. A pre-check failure fails open every charge of the run.
 
 Configuration:
 - `config/rules/amazon_us.yaml`: channel rules only. A value needs a source URL, a retrieval date, `retrieved_by: human` and a verbatim excerpt, or the loader refuses it. Unsourced values are null.
@@ -29,7 +29,7 @@ Configuration:
 |---|---|---|---|
 | `unit_resolved` | a record carries the unit and sku/fnsku agree | no record, or a key conflicts | - |
 | `not_duplicate` | no earlier line with the same fingerprint | duplicate of an earlier line | - |
-| `not_already_reimbursed` | no, or partial, matching reimbursement | fully reimbursed, or the line is itself a reimbursement | - |
+| `not_already_reimbursed` | no, or partial, matching reimbursement | fully reimbursed, or the line is itself a reimbursement | a refund could belong to more than one fee |
 | `within_filing_window` | sourced deadline not passed | sourced deadline passed | no sourced window ("filing deadline not verified") |
 | `evidence_present` | a usable record speaks to the charge | nothing speaks to it | - |
 | `evidence_in_custody_window` | an in-scope record is inside the window | in-scope records exist, none inside | no in-scope record |
@@ -42,20 +42,21 @@ Configuration:
 |---|---|---|---|
 | 1 | R_FEE_REFUND_LINE | DO_NOT_CLAIM | not_already_reimbursed |
 | 2 | R_ZERO_FEE | DO_NOT_CLAIM | amount_computable |
-| 3 | R_DUPLICATE | CLAIM (REVIEW if the sourced deadline passed) | not_duplicate |
-| 4 | R_ALREADY_REIMBURSED | DO_NOT_CLAIM | not_already_reimbursed |
-| 5 | R_UNRESOLVED_UNIT | REVIEW | unit_resolved |
-| 6 | R_EVIDENCE_OUTSIDE_WINDOW | REVIEW | evidence_in_custody_window |
-| 7 | R_NO_RELEVANT_EVIDENCE | REVIEW | evidence_present |
-| 8 | R_AMOUNT_NOT_COMPUTABLE (loss events) | REVIEW | amount_computable |
-| 9 | R_CONFLICTING | REVIEW | evidence_contradicts_charge |
-| 10 | R_SUPPORTED | DO_NOT_CLAIM | evidence_contradicts_charge |
-| 11 | R_INSUFFICIENT | REVIEW | evidence_contradicts_charge |
-| 12 | R_AMOUNT_NOT_COMPUTABLE (fees) | REVIEW | amount_computable |
-| 13 | R_PARTIAL_COVERAGE | REVIEW | evidence_contradicts_charge |
-| 14 | R_DEFECT_CATEGORY_MISSING | REVIEW | evidence_contradicts_charge |
-| 15 | R_FILING_WINDOW_PASSED | REVIEW | within_filing_window |
-| 16 | R_CONTRADICTED_FULL | CLAIM | evidence_contradicts_charge |
+| 3 | R_REIMBURSEMENT_AMBIGUOUS | REVIEW | not_already_reimbursed |
+| 4 | R_DUPLICATE | CLAIM (REVIEW if the sourced deadline passed) | not_duplicate |
+| 5 | R_ALREADY_REIMBURSED | DO_NOT_CLAIM | not_already_reimbursed |
+| 6 | R_UNRESOLVED_UNIT | REVIEW | unit_resolved |
+| 7 | R_EVIDENCE_OUTSIDE_WINDOW | REVIEW | evidence_in_custody_window |
+| 8 | R_NO_RELEVANT_EVIDENCE | REVIEW | evidence_present |
+| 9 | R_AMOUNT_NOT_COMPUTABLE (loss events) | REVIEW | amount_computable |
+| 10 | R_CONFLICTING | REVIEW | evidence_contradicts_charge |
+| 11 | R_SUPPORTED | DO_NOT_CLAIM | evidence_contradicts_charge |
+| 12 | R_INSUFFICIENT | REVIEW | evidence_contradicts_charge |
+| 13 | R_AMOUNT_NOT_COMPUTABLE (fees) | REVIEW | amount_computable |
+| 14 | R_PARTIAL_COVERAGE | REVIEW | evidence_contradicts_charge |
+| 15 | R_DEFECT_CATEGORY_MISSING | REVIEW | evidence_contradicts_charge |
+| 16 | R_FILING_WINDOW_PASSED | REVIEW | within_filing_window |
+| 17 | R_CONTRADICTED_FULL | CLAIM | evidence_contradicts_charge |
 
 After the engine: `R_CITATION_INVALID` (validator) or `R_ENGINE_ERROR` (exception), both REVIEW with status `pending`.
 

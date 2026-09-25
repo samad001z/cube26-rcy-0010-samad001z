@@ -5,6 +5,7 @@ the store (not the objects the engine used), and fails closed:
   cited hash, the body re-hashes to the same value, and every cited check_key exists on it;
 - evidence cited as contradicting or supporting the charge lies inside its custody window;
 - every cited charge line exists and re-hashes to the cited hash; so does the decided charge;
+- the reimbursed amount is no more than the cited refund lines add up to in the store;
 - a CLAIM has a positive amount no greater than charged - reimbursed, and cites at least one
   contradicting record or a canonical duplicate; a non-CLAIM carries no claim amount;
 - the decision's own content hash verifies.
@@ -21,7 +22,7 @@ from app.models.charge import Charge
 from app.models.contract import EvidenceRecord
 from app.models.decision import DecisionRecord
 from app.models.vocab import Decision, RecordStatus
-from app.retrieval import in_custody_window
+from app.retrieval import in_custody_window, in_scope
 
 RULE_ID = "R_CITATION_INVALID"
 
@@ -51,6 +52,7 @@ def validate(
     if stored_charge is None or stored_charge.compute_hash() != charge.compute_hash():
         errors.append(f"charge {charge.line_id} not found in the store or changed")
 
+    refunded = Decimal("0.00")
     for cite in decision.citations:
         if cite.kind == "evidence":
             stored = lookup.evidence(cite.id)
@@ -67,14 +69,26 @@ def validate(
             missing = set(cite.check_keys) - {c.check_key for c in rec.checks}
             if missing:
                 errors.append(f"cited record {cite.id} has no check {sorted(missing)}")
-            if cite.role in ("contradicts", "supports") and not in_custody_window(charge, rec, cfg):
-                errors.append(f"cited record {cite.id} is outside the custody window")
+            if cite.role in ("contradicts", "supports"):
+                if not in_scope(charge, rec, cfg):
+                    errors.append(f"cited record {cite.id} is out of scope for the charge")
+                if not in_custody_window(charge, rec, cfg):
+                    errors.append(f"cited record {cite.id} is outside the custody window")
         else:
             other = lookup.charge(cite.id)
             if other is None:
                 errors.append(f"cited charge {cite.id} not found")
             elif other.organization_id != org or other.compute_hash() != cite.content_hash:
                 errors.append(f"cited charge {cite.id} hash mismatch")
+            elif cite.role == "reimbursement":
+                refunded += other.amount
+
+    # The reimbursed amount must be backed by the refund lines cited, read from the store.
+    if decision.amount_reimbursed > refunded:
+        errors.append(
+            f"amount_reimbursed {decision.amount_reimbursed} exceeds the cited refund lines "
+            f"({refunded})"
+        )
 
     claim = decision.claim
     if decision.decision == Decision.CLAIM:

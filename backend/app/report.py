@@ -51,11 +51,16 @@ def render_summary(decisions: list[DecisionRecord]) -> list[str]:
     by_decision = Counter(d.decision.value for d in decisions)
     by_rule = Counter(d.rule_id for d in decisions)
     pending = sum(1 for d in decisions if d.status.value == "pending")
-    total_claim = sum((d.claim.amount for d in decisions if d.claim), Decimal("0.00"))
+    totals: dict[str, Decimal] = {}
+    for d in decisions:
+        if d.claim:
+            cur = d.claim.currency
+            totals[cur] = totals.get(cur, Decimal("0.00")) + d.claim.amount
+    total_text = ", ".join(f"{amt} {cur}" for cur, amt in sorted(totals.items())) or "0.00"
     lines = [
         f"decisions: {len(decisions)}  "
         + "  ".join(f"{k}={by_decision.get(k.value, 0)}" for k in Decision),
-        f"claim total: {total_claim} USD   pending (failed open or invalid citations): {pending}",
+        f"claim total: {total_text}   pending (failed open or invalid citations): {pending}",
         "by rule: " + ", ".join(f"{r}={n}" for r, n in sorted(by_rule.items())),
     ]
     return lines

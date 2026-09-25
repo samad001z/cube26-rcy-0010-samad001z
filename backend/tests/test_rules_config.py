@@ -129,3 +129,10 @@ def test_zero_amount_kinds_are_as_decided_in_d011():
         ChargeType.DAMAGED_IN_WAREHOUSE: "loss_event",
         ChargeType.REFUND_ISSUED_ITEM_NOT_RETURNED: "loss_event",
     }
+
+
+def test_boolean_window_is_refused():
+    data = _rules()
+    data["filing_window_days"]["lost_inbound"] = {**SOURCED, "value": True}
+    with pytest.raises(ValidationError, match="boolean"):
+        parse_rules(data)

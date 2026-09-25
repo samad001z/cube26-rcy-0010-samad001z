@@ -293,3 +293,26 @@ def test_engine_invariants_hold_for_any_input(case):
     # Engine output always passes the validator against an honest store.
     lookup = DictLookup(records, [c, *others])
     assert validate(d, c, lookup, CFG) == []
+
+
+def test_reimbursed_amount_must_be_backed_by_cited_refund_lines():
+    d, c, r = _claim_case()
+    # Engine output with no refund cited; forge a reimbursed amount (lowers nothing here,
+    # but a larger one would silently change the cap).
+    forged = d.model_copy(update={"amount_reimbursed": Decimal("0.50")}).with_hash()
+    errors = validate(forged, c, DictLookup([r], [c]), CFG)
+    assert "amount_reimbursed 0.50 exceeds the cited refund lines (0.00)" in errors
+
+
+def test_citation_out_of_scope_is_rejected():
+    d, c, _ = _claim_case()
+    other_ship = prep_all_pass(fba_shipment_id="FBA-9")
+    forged = d.model_copy(
+        update={
+            "citations": [
+                d.citations[0].model_copy(update={"content_hash": other_ship.content_hash or ""})
+            ]
+        }
+    ).with_hash()
+    errors = validate(forged, c, DictLookup([other_ship], [c]), CFG)
+    assert "cited record PRP-1 is out of scope for the charge" in errors

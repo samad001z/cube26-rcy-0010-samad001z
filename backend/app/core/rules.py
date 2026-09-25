@@ -44,6 +44,8 @@ class RuleValue(_Strict):
     def _no_floats(cls, v: Any) -> Any:
         if isinstance(v, float):
             raise ValueError("rule values must not be floats; quote decimals as strings")
+        if isinstance(v, bool):
+            raise ValueError("rule values must not be booleans; a window must be a positive int")
         return v
 
     @model_validator(mode="after")
@@ -81,7 +83,9 @@ class ChannelRules(_Strict):
         if missing:
             raise ValueError(f"filing_window_days missing {sorted(missing)} (use value: null)")
         for ct, rule in v.items():
-            if rule.value is not None and (not isinstance(rule.value, int) or rule.value <= 0):
+            if rule.value is not None and (
+                isinstance(rule.value, bool) or not isinstance(rule.value, int) or rule.value <= 0
+            ):
                 raise ValueError(f"filing window for {ct} must be a positive integer of days")
         return v
 

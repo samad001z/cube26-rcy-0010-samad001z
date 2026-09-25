@@ -14,6 +14,7 @@ from datetime import UTC, date, datetime
 from decimal import Decimal
 
 from sqlalchemy import Engine
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.claims.validator import StoredRecord, enforce, validate
@@ -24,7 +25,7 @@ from app.engine import DECIDED_BY, ENGINE_VERSION, decide
 from app.models.charge import Charge
 from app.models.contract import Check, EvidenceRecord, Outcome
 from app.models.decision import DecisionRecord, DecisionSubject
-from app.models.vocab import Decision, EvidenceStatus, RecordStatus, Verdict
+from app.models.vocab import Decision, EvidenceStatus, ReasonCode, RecordStatus, Verdict
 from app.precheck import Precheck, run_prechecks
 from app.resolution import resolve_unit
 from app.retrieval import retrieve
@@ -77,7 +78,7 @@ def fail_open_decision(
     why = f"not evaluated: {type(exc).__name__}: {exc}"
     zero = Decimal("0.00")
     return DecisionRecord(
-        record_id=f"DEC-{run_id[:8]}-{charge.line_id}",
+        record_id=f"DEC-{run_id}-{charge.line_id}",
         organization_id=charge.organization_id,
         client_id=charge.organization_id,
         subject=DecisionSubject(
@@ -102,14 +103,16 @@ def fail_open_decision(
         run_id=run_id,
         decision=Decision.REVIEW,
         evidence_status=EvidenceStatus.INSUFFICIENT,
-        reason_code=None,
+        # Rule 5: a failed dependency (the database here; a model later) is MODEL_UNAVAILABLE.
+        # A bug in the engine itself carries no reason code; the error is in the reason.
+        reason_code=ReasonCode.MODEL_UNAVAILABLE if isinstance(exc, SQLAlchemyError) else None,
         rule_id=ENGINE_ERROR_RULE,
         rule_path=[ENGINE_ERROR_RULE],
         reason=f"The engine failed on this charge, so it was kept for review ({why}).",
         next_action="Fix the error and re-run; the charge and evidence are unchanged.",
         confidence=zero,
         amount_charged=charge.amount,
-        amount_reimbursed=zero,
+        amount_reimbursed=zero,  # not computed: the pre-checks did not complete for this charge
         currency=charge.currency,
         claim=None,
         citations=[],
@@ -169,7 +172,13 @@ def run_org(
         by_unit: dict[str, list[EvidenceRecord]] = defaultdict(list)
         for r in repo.list_records(session):
             by_unit[r.subject.unit_id].append(r)
-        prechecks = run_prechecks(charges, rules, cfg, as_of)
+        # A pre-check failure must not lose the run: every charge then fails open.
+        prechecks: dict[str, Precheck] = {}
+        precheck_error: Exception | None = None
+        try:
+            prechecks = run_prechecks(charges, rules, cfg, as_of)
+        except Exception as exc:
+            precheck_error = exc
         repo.add_audit_event(
             session,
             org,
@@ -185,6 +194,8 @@ def run_org(
         )
         for charge in charges:
             try:
+                if precheck_error is not None:
+                    raise precheck_error
                 with session.begin_nested():
                     d = _decide_one(
                         session,
@@ -201,7 +212,8 @@ def run_org(
                 d = fail_open_decision(
                     charge, exc, run_id=run_id, decided_at=decided_at, rules=rules, cfg=cfg
                 )
-                repo.insert_decision(session, d)
+                with session.begin_nested():
+                    repo.insert_decision(session, d)
                 repo.add_audit_event(
                     session, org, "DECISION_FAILED_OPEN", {**_audit_payload(d), "error": repr(exc)}
                 )

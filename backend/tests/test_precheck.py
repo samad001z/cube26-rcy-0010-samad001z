@@ -73,14 +73,27 @@ def _refund(line_id: str, amount: str, **kw) -> Charge:
 def test_refund_on_same_unit_and_type_offsets_the_fee():
     fee = charge("L-1", posted=date(2026, 7, 1))
     r = _refund("R-1", "2.00", posted=date(2026, 7, 5))
-    assert match_reimbursements([fee, r], CFG) == {"L-1": (r,)}
+    m = match_reimbursements([fee, r], CFG)
+    assert m.allocated == {"L-1": ((r, Decimal("2.00")),)} and m.ambiguous == {}
 
 
-def test_refund_is_allocated_once_to_the_earliest_fee():
+def test_refund_that_fits_two_different_fees_is_ambiguous_not_allocated():
+    # Replaces an earlier expectation (allocate to the earliest fee) that let a later fee
+    # be claimed after it was refunded; see rules review M2 and D-015.
     f1 = charge("L-1", posted=date(2026, 7, 1))
     f2 = charge("L-2", posted=date(2026, 7, 2), amount="3.00")
     r = _refund("R-1", "2.00", posted=date(2026, 7, 5))
-    assert match_reimbursements([f2, f1, r], CFG) == {"L-1": (r,)}
+    m = match_reimbursements([f2, f1, r], CFG)
+    assert m.allocated == {}
+    assert m.ambiguous == {"L-1": (r,), "L-2": (r,)}
+
+
+def test_refund_within_a_duplicate_group_goes_to_the_duplicate_first():
+    f1 = charge("L-1", posted=date(2026, 7, 1))
+    f2 = charge("L-2", posted=date(2026, 7, 2))
+    r = _refund("R-1", "3.00", posted=date(2026, 7, 5))
+    m = match_reimbursements([f1, f2, r], CFG)
+    assert m.allocated == {"L-2": ((r, Decimal("2.00")),), "L-1": ((r, Decimal("1.00")),)}
 
 
 def test_refund_before_the_fee_other_unit_or_type_does_not_match():
@@ -93,7 +106,8 @@ def test_refund_before_the_fee_other_unit_or_type_does_not_match():
         charge_type=ChargeType.FULFILMENT_FEE_WEIGHT_TIER,
         posted=date(2026, 7, 11),
     )
-    assert match_reimbursements([fee, early, other_unit, other_type], CFG) == {}
+    m = match_reimbursements([fee, early, other_unit, other_type], CFG)
+    assert m.allocated == {} and m.ambiguous == {}
 
 
 def test_loss_event_reimbursement_never_offsets_a_fee():
@@ -101,7 +115,8 @@ def test_loss_event_reimbursement_never_offsets_a_fee():
     paid = _refund(
         "R-1", "14.00", charge_type=ChargeType.DAMAGED_IN_WAREHOUSE, posted=date(2026, 6, 27)
     )
-    assert match_reimbursements([fee, paid], CFG) == {}
+    m = match_reimbursements([fee, paid], CFG)
+    assert m.allocated == {} and m.ambiguous == {}
 
 
 def test_run_prechecks_sums_reimbursed_amount_as_decimal():

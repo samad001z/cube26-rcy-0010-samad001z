@@ -348,3 +348,34 @@ def test_sample_rule_counts_snapshot(app_engine, loaded, org):
     decisions = _latest_run(app_engine, org)
     assert dict(Counter(d.rule_id for d in decisions)) == SAMPLE_RULE_COUNTS[org]
     assert all(d.decision == Decision.REVIEW for d in decisions)  # 0 CLAIM on the sample
+
+
+def test_precheck_failure_fails_open_for_every_charge(app_engine, loaded, monkeypatch):
+    org = "org_test_precheck_fail"
+    _load_synthetic(app_engine, org)
+
+    def broken(*args, **kwargs):
+        raise ValueError("bad rules")
+
+    monkeypatch.setattr("app.pipeline.run_prechecks", broken)
+    result = run_org(app_engine, org, AS_OF)
+    assert {d.subject.line_id for d in result.decisions} == {"SYN-1", "SYN-2"}
+    for d in result.decisions:
+        assert d.status == RecordStatus.PENDING and d.rule_id == "R_ENGINE_ERROR"
+        assert d.reason_code is None and "ValueError: bad rules" in d.reason
+    with org_session(app_engine, org) as s:
+        assert len(repo.list_decisions(s, result.run_id)) == 2
+
+
+def test_dependency_failure_is_model_unavailable(app_engine, loaded, monkeypatch):
+    org = "org_test_dependency_fail"
+    _load_synthetic(app_engine, org)
+
+    def db_down(*args, **kwargs):
+        raise sa.exc.OperationalError("SELECT 1", {}, Exception("connection lost"))
+
+    monkeypatch.setattr("app.pipeline.decide", db_down)
+    result = run_org(app_engine, org, AS_OF)
+    for d in result.decisions:
+        assert d.status == RecordStatus.PENDING and d.decision == Decision.REVIEW
+        assert d.reason_code is not None and d.reason_code.value == "MODEL_UNAVAILABLE"

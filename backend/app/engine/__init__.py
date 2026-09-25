@@ -7,22 +7,23 @@ decision rests on, and the decision's confidence is that check's confidence.
   #   rule_id                    when                                          decision
   1   R_FEE_REFUND_LINE          reimbursement line on a fee type              DO_NOT_CLAIM
   2   R_ZERO_FEE                 fee line of 0.00                              DO_NOT_CLAIM
-  3   R_DUPLICATE                duplicate of an earlier fee line              CLAIM
-  4   R_ALREADY_REIMBURSED       reimbursed >= charged                         DO_NOT_CLAIM
-  5   R_UNRESOLVED_UNIT          unit resolution failed                        REVIEW
-  6   R_EVIDENCE_OUTSIDE_WINDOW  in-scope records, none in custody window      REVIEW
-  7   R_NO_RELEVANT_EVIDENCE     nothing can speak to the charge               REVIEW
-  8   R_AMOUNT_NOT_COMPUTABLE    loss event (D-011)                            REVIEW
-  9   R_CONFLICTING              records disagree                              REVIEW
-  10  R_SUPPORTED                evidence supports the charge                  DO_NOT_CLAIM
-  11  R_INSUFFICIENT             evidence cannot settle it                     REVIEW
-  12  R_AMOUNT_NOT_COMPUTABLE    fee whose amount needs an unsourced rule      REVIEW
-  13  R_PARTIAL_COVERAGE         contradicted for some of the units            REVIEW
-  14  R_DEFECT_CATEGORY_MISSING  inbound defect fee names no category          REVIEW
-  15  R_FILING_WINDOW_PASSED     sourced deadline has passed                   REVIEW
-  16  R_CONTRADICTED_FULL        contradicted for every unit                   CLAIM
+  3   R_REIMBURSEMENT_AMBIGUOUS  a refund could belong to this or another fee  REVIEW
+  4   R_DUPLICATE                duplicate of an earlier fee line              CLAIM
+  5   R_ALREADY_REIMBURSED       reimbursed >= charged                         DO_NOT_CLAIM
+  6   R_UNRESOLVED_UNIT          unit resolution failed                        REVIEW
+  7   R_EVIDENCE_OUTSIDE_WINDOW  in-scope records, none in custody window      REVIEW
+  8   R_NO_RELEVANT_EVIDENCE     nothing can speak to the charge               REVIEW
+  9   R_AMOUNT_NOT_COMPUTABLE    loss event (D-011)                            REVIEW
+  10  R_CONFLICTING              records disagree                              REVIEW
+  11  R_SUPPORTED                evidence supports the charge                  DO_NOT_CLAIM
+  12  R_INSUFFICIENT             evidence cannot settle it                     REVIEW
+  13  R_AMOUNT_NOT_COMPUTABLE    fee whose amount needs an unsourced rule      REVIEW
+  14  R_PARTIAL_COVERAGE         contradicted for some of the units            REVIEW
+  15  R_DEFECT_CATEGORY_MISSING  inbound defect fee names no category          REVIEW
+  16  R_FILING_WINDOW_PASSED     sourced deadline has passed                   REVIEW
+  17  R_CONTRADICTED_FULL        contradicted for every unit                   CLAIM
 
-A duplicate (rule 3) is still subject to rules 4 and 15: fully reimbursed -> rule 4; a
+A duplicate (rule 4) is still subject to rules 5 and 16: fully reimbursed -> rule 5; a
 passed deadline -> REVIEW. An unverified deadline never blocks a CLAIM; it adds the
 warning "filing deadline not verified" (D-014).
 """
@@ -92,7 +93,7 @@ def _evidence_checks(
         "evidence_present",
         Verdict.FAIL if a.no_relevant else Verdict.PASS,
         exact,
-        a.detail if a.no_relevant else f"{len(a.findings)} usable record(s) speak to the charge",
+        f"{len(a.findings)} usable record(s) speak to the charge" if a.findings else a.detail,
     )
     if not resolution.resolved or not in_scope:
         window = _check(
@@ -138,6 +139,33 @@ def _evidence_checks(
             f"{a.status.value}: {a.detail}",
         )
     return [present, window, contra]
+
+
+def _reimbursed_check(charge: Charge, pre: Precheck, cfg: EngineConfig) -> Check:
+    exact = cfg.confidence.exact
+    reimbursed = pre.reimbursed_amount
+    if is_fee_refund_line(charge, cfg):
+        return _check(
+            "not_already_reimbursed", Verdict.FAIL, exact, "this line is itself a reimbursement"
+        )
+    if pre.ambiguous_reimbursements:
+        ids = ", ".join(r.line_id for r in pre.ambiguous_reimbursements)
+        return _check(
+            "not_already_reimbursed",
+            Verdict.UNCERTAIN,
+            exact,
+            f"refund line(s) {ids} could belong to this fee or to another one on the same unit",
+        )
+    if pre.reimbursements:
+        ids = ", ".join(r.line_id for r in pre.reimbursements)
+        full = charge.amount > ZERO and reimbursed >= charge.amount
+        return _check(
+            "not_already_reimbursed",
+            Verdict.FAIL if full else Verdict.PASS,
+            exact,
+            f"reimbursed {reimbursed} {charge.currency} of {charge.amount} via {ids}",
+        )
+    return _check("not_already_reimbursed", Verdict.PASS, exact, "no matching reimbursement line")
 
 
 def _amount_check(
@@ -200,6 +228,18 @@ def _fire(
             "amount_computable",
             f"fee of 0.00 {charge.currency}: nothing was charged, so nothing is recoverable "
             "from this line (D-011).",
+        )
+    if pre.ambiguous_reimbursements:
+        ids = ", ".join(r.line_id for r in pre.ambiguous_reimbursements)
+        return Fired(
+            "R_REIMBURSEMENT_AMBIGUOUS",
+            Decision.REVIEW,
+            None,
+            "not_already_reimbursed",
+            f"refund line(s) {ids} could belong to this fee or to another fee on the same unit, "
+            "so what is already reimbursed cannot be computed.",
+            "Match the refund to its fee (e.g. by reimbursement or case id in Seller Central), "
+            "then decide by override.",
         )
     cap = charge.amount - pre.reimbursed_amount
     if pre.duplicate_of is not None and cap > ZERO:
@@ -367,7 +407,7 @@ def _citations(charge: Charge, pre: Precheck, a: Assessment, fired: Fired) -> li
                 role="canonical_charge",
             )
         )
-    for r in pre.reimbursements:
+    for r in (*pre.reimbursements, *pre.ambiguous_reimbursements):
         out.append(
             Citation(
                 kind="charge", id=r.line_id, content_hash=r.compute_hash(), role="reimbursement"
@@ -426,22 +466,7 @@ def decide(
             if dup
             else "no earlier line with the same fingerprint",
         ),
-        _check(
-            "not_already_reimbursed",
-            Verdict.FAIL
-            if (charge.amount > ZERO and reimbursed >= charge.amount)
-            or is_fee_refund_line(charge, cfg)
-            else Verdict.PASS,
-            exact,
-            f"reimbursed {reimbursed} {charge.currency} via "
-            + ", ".join(r.line_id for r in pre.reimbursements)
-            if pre.reimbursements
-            else (
-                "this line is itself a reimbursement"
-                if is_fee_refund_line(charge, cfg)
-                else "no matching reimbursement line"
-            ),
-        ),
+        _reimbursed_check(charge, pre, cfg),
         _check("within_filing_window", pre.filing.verdict, exact, pre.filing.detail),
         *_evidence_checks(charge, resolution, candidates, a, cfg),
         amount_check,
@@ -485,7 +510,7 @@ def decide(
         for c in candidates
     ]
     record = DecisionRecord(
-        record_id=f"DEC-{run_id[:8]}-{charge.line_id}",
+        record_id=f"DEC-{run_id}-{charge.line_id}",
         organization_id=charge.organization_id,
         client_id=charge.organization_id,
         subject=DecisionSubject(

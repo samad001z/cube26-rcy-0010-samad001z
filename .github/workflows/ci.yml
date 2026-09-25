@@ -1,0 +1,37 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: ci_only
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 2s
+          --health-timeout 3s --health-retries 30
+    env:
+      PGHOST: localhost
+      PGPASSWORD: ci_only
+      POSTGRES_USER: postgres
+      ALIBI_OWNER_PASSWORD: ci_only
+      ALIBI_APP_PASSWORD: ci_only
+      DATABASE_URL: postgresql+psycopg://alibi_app:ci_only@localhost:5432/alibi
+      MIGRATION_DATABASE_URL: postgresql+psycopg://alibi_owner:ci_only@localhost:5432/alibi
+      TEST_DATABASE_URL: postgresql+psycopg://alibi_app:ci_only@localhost:5432/alibi_test
+      TEST_MIGRATION_DATABASE_URL: postgresql+psycopg://alibi_owner:ci_only@localhost:5432/alibi_test
+      ATTACHMENT_KEY_SECRET: ci-attachment-secret
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Create roles and databases
+        run: bash docker/postgres/init.sh
+      - run: make install
+      - run: make lint
+      - run: make test

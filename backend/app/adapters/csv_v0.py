@@ -66,7 +66,7 @@ def attachment_key(secret: str, organization_id: str, record_id: str, path: str)
     return hmac.new(secret.encode(), msg, hashlib.sha256).hexdigest()
 
 
-def _file_sha256(path: Path) -> str:
+def file_sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
@@ -231,7 +231,7 @@ def load_upstream(
     seen: set[tuple[str, str]] = set()
     for pod, pod_cfg in cfg["pods"].items():
         path = directory / pod_cfg["file"]
-        file_hash = _file_sha256(path)
+        file_hash = file_sha256(path)
         with path.open(newline="", encoding="utf-8") as fh:
             for n, row in enumerate(csv.DictReader(fh), start=1):
                 try:
@@ -253,7 +253,7 @@ def load_upstream(
 
 def load_fee_report(path: Path) -> ChargeLoad:
     result = ChargeLoad()
-    file_hash = _file_sha256(path)
+    file_hash = file_sha256(path)
     seen: set[tuple[str, str]] = set()
     with path.open(newline="", encoding="utf-8") as fh:
         for n, row in enumerate(csv.DictReader(fh), start=1):

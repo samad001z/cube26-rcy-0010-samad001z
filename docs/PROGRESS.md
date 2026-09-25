@@ -2,6 +2,27 @@
 
 Update at the end of every session. Newest entry on top.
 
+### 2026-09-25 - Day 3 (eval set, harness, POST /agent), branch `day3-eval`
+- Done:
+  - Task 0: `docs/design/` archived to `docs/archive/pre-round2-design/` (README: history only). PRD moved to `docs/product/PRD.md` and aligned with the build: F1 CSV only, no PDF/email, no Jev, the vocabulary, held-out eval, no forbidden wording. References updated (CLAUDE.md, ROUND2_PLAN, DECISIONS, rules-guardian, /phase).
+  - Task 0b: `docs/reviews/copilot-pr14-triage.md` checks all 13 findings against the code. Two were still valid and are now fixed: the evidence key (D-018: `(org, agent, record_id)`, migration 0003, citations carry the pod) and API auth (Task 4). One stays open for Day 4 (the override flow). The rest were already fixed or are moot.
+  - Task 1 (D-019): the refund returns custody window is now -60/+120 days, matching the sourced filing window. `check_windows_consistent` refuses a config where they drift apart. An unresolved unit gives `evidence_present` and `evidence_in_custody_window` UNCERTAIN, "unit not resolved". Sample counts and snapshot unchanged: the sample has no unresolved units, and its returns are all at +0 days. One pre-existing test moved from +69 to +121 days, approved by the human lead.
+  - Task 2: `eval/`, 58 report lines on 52 units, both orgs, all 5 charge types. About 12 lines are plausible CLAIMs (stated defects across five prep checks, repeated fees of both fee types, a partial refund). Identifiers are shuffled, and no expected answers are recorded anywhere. `make_sheet.py` builds `labelling_sheet.csv` through the adapter and the sourced deadlines only, and shows every verdict with its recorded raw value. `labels_A.csv` and `labels_B.csv` are blank templates. `eval/README.md` says how the cases were chosen and states the limitation that the same author wrote the engine and the cases.
+  - Task 3: `eval/run_eval.py` (`make eval`). It refuses unless the labels, sheet and data are committed and unchanged. It reports agreement and kappa before resolution, computes no agent metric while any disagreement is unresolved, then runs the real pipeline on a fresh `alibi_eval` DB and writes REPORT.md. Exit 4 means at least one false claim; exit 5 means a charge got no decision. Built, **not run on the eval set**.
+  - Task 4 (D-020): `POST /agent` takes multipart uploads and returns the CLI JSON. `X-API-Key` is hashed and compared with `compare_digest`. The org comes only from the key; the date is today (UTC); the config is checked before any write. `alibi api-key` makes a key; `.env.example` has the `ALIBI_API_KEYS` placeholder (empty means 401 to everyone).
+  - Also: `pod_file()` finds `<pod>_*.csv`, and `RunResult.latency_ms` measures latency per charge.
+- Reviews:
+  - rules-guardian: no Critical or High findings, and no path to a wrong CLAIM. Its 2 Medium findings are fixed: inputs frozen after labelling, and the config checked before any API write. Its Low findings are fixed too: the API doc wording, `as_of` removed from the API, the engine.yaml comment, raw values on the sheet, dropped charges fail the eval, dates corrected, other orgs' bad rows no longer stored.
+  - test-guardian: nothing pre-existing was weakened and the snapshot is untouched; 16 of 21 mutants were caught. The 3 meaningful survivors now have tests, and I re-mutated each to confirm it is caught. It also found the PRD's 0-false-claim gate was not enforced; `run_eval` now exits 4. It noted the late-return eval case was written just after the D-019 fix, which is now disclosed in eval/README.md.
+- Tests/eval status: `make lint test` green: 257 backend and 43 eval tests passed, on Postgres 16. `make eval` refuses, as intended, because the labels are blank. `alibi run` (as of 2026-09-25): alpha 40 lines = 0 CLAIM, 1 DO_NOT_CLAIM, 39 REVIEW; bravo 21 lines = 0 CLAIM, 1 DO_NOT_CLAIM, 20 REVIEW. Both unchanged. No eval result yet.
+- Open issues:
+  - The human lead reviews `eval/labelling_sheet.csv`, then two humans label independently and commit, and only then `make eval` runs.
+  - Day 4: the override flow (triage finding 11).
+  - No request-size limit in front of the app; the multipart body is parsed before the key check (D-020). That is deploy work.
+  - The dates of the Round 2 plan are ahead of the calendar: all Day 1-3 work was done on 2026-09-25. The eval's fixed as-of date is 2026-09-27.
+- Environment: this cloud session has no Docker. Postgres 16 runs from the container install, and `alibi_eval` was created by hand (`docker/postgres/init.sh` now creates it).
+- Next step: human review of the sheet and the labelling. Then Day 4: review UI, overrides, fail-open tests.
+
 ### 2026-09-25 - Day 2 fixes, branch `day2-fixes`
 - Done:
   - Task 1 (D-016): claim direction for loss events. `evidence_status` is now always relative to what the line asserts; lost inbound and damaged in warehouse were inverted. Loss events map per charge type through `config/engine.yaml` `loss_event_outcomes` (one commented row each) and are never CLAIM. A refund counts as returned complete only when identity, parts and condition all PASS; anything else is REVIEW, "possible separate claim". A lost unit seen later is REVIEW, `R_LOSS_DOUBTFUL`. A known passed deadline on a loss event is DO_NOT_CLAIM, `FILING_WINDOW_EXPIRED`. Next actions on refuting rows never steer towards claiming.

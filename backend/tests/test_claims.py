@@ -316,3 +316,20 @@ def test_citation_out_of_scope_is_rejected():
     ).with_hash()
     errors = validate(forged, c, DictLookup([other_ship], [c]), CFG)
     assert "cited record PRP-1 is out of scope for the charge" in errors
+
+
+def test_a_loss_event_claim_is_rejected_by_the_validator():
+    # Defence in depth: the engine never emits this; the validator refuses it anyway.
+    c = charge(charge_type=ChargeType.LOST_INBOUND, amount="14.00")
+    r = prep_all_pass()
+    d = run(c, [r])
+    assert d.decision == Decision.REVIEW
+    forged = d.model_copy(
+        update={
+            "decision": Decision.CLAIM,
+            "claim": Claim(amount=Decimal("14.00"), currency="USD", computation=[]),
+        }
+    ).with_hash()
+    assert "a loss event is never CLAIM (D-011, D-016)" in validate(
+        forged, c, DictLookup([r], [c]), CFG
+    )

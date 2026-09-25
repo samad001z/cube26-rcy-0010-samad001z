@@ -75,10 +75,10 @@ Loss-event rows (`config/engine.yaml` `loss_event_outcomes`, D-016):
 | refund, item not returned | ordered item back; incomplete, damaged or condition uncertain | CONTRADICTED | REVIEW (possible separate claim) | R_RETURNED_INCOMPLETE_OR_DAMAGED |
 | refund, item not returned | a different item came back | SUPPORTED | REVIEW until an amount is computable | R_AMOUNT_NOT_COMPUTABLE |
 | lost inbound | prep on the shipment, no later record of the unit | SUPPORTED | REVIEW until an amount is computable | R_AMOUNT_NOT_COMPUTABLE |
-| lost inbound | the unit was seen after the loss | CONTRADICTED | REVIEW (loss doubtful) | R_LOSS_DOUBTFUL |
-| damaged in warehouse | prep with no failed check | SUPPORTED | REVIEW until an amount is computable | R_AMOUNT_NOT_COMPUTABLE |
+| lost inbound | a final customer return of the unit after the loss, identity PASS | CONTRADICTED | REVIEW (loss doubtful) | R_LOSS_DOUBTFUL |
+| damaged in warehouse | final prep with at least one check, every check PASS | SUPPORTED | REVIEW until an amount is computable | R_AMOUNT_NOT_COMPUTABLE |
 
-Only the "until an amount is computable" rows suggest an override with an amount. A refund line with no returns record in the custody window is rule 8 (INSUFFICIENT); its reason notes that the absence is consistent with the seller's claim but is not evidence.
+Only the "until an amount is computable" rows suggest an override with an amount. The validator also refuses any CLAIM on a loss event. A refund line with no returns record in the custody window is rule 9, `R_NO_RELEVANT_EVIDENCE` (INSUFFICIENT); its reason notes that the absence is consistent with the seller's claim but is not evidence.
 
 After the engine: `R_CITATION_INVALID` (validator) or `R_ENGINE_ERROR` (exception), both REVIEW with status `pending`.
 

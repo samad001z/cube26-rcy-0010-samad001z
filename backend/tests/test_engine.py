@@ -326,8 +326,9 @@ def test_loss_events_are_never_claim_even_with_supporting_evidence():
 # --- loss events: one test per row of config loss_event_outcomes (D-016) ------------------
 
 # Words that would steer a reviewer towards claiming. Never in a next action where the
-# evidence refutes the seller's claim.
-CLAIM_WORDS = ("override", "claim the", "to claim", "CLAIM", "amount")
+# evidence refutes the seller's claim. Matched case-insensitively; "do not claim" is the
+# only allowed use of "claim".
+CLAIM_WORDS = ("override", "amount", "claim")
 
 
 def _returns(
@@ -368,8 +369,15 @@ def _lost_line(posted: date) -> Charge:
     return charge(charge_type=ChargeType.LOST_INBOUND, amount="0.00", posted=posted)
 
 
+def _steers_to_claim(text: str | None) -> bool:
+    if text is None:
+        return False
+    t = text.lower().replace("do not claim", "")
+    return any(w in t for w in CLAIM_WORDS)
+
+
 def _no_claim_steer(d: DecisionRecord) -> None:
-    assert d.next_action is None or not any(w in d.next_action for w in CLAIM_WORDS), d.next_action
+    assert not _steers_to_claim(d.next_action), d.next_action
 
 
 def test_refund_returned_complete_is_do_not_claim():
@@ -479,6 +487,35 @@ def test_lost_inbound_pending_later_return_is_insufficient_not_supported():
     assert d.decision == Decision.REVIEW and d.rule_id == "R_INSUFFICIENT"
 
 
+def test_the_claim_steer_guard_catches_mixed_case_and_conditional_claims():
+    assert _steers_to_claim("Claim only if the later record is a different unit.")
+    assert _steers_to_claim("Then record an Override.")
+    assert not _steers_to_claim("Do not claim this loss. Re-run after fixing the record.")
+
+
+def test_damaged_prep_with_only_uncertain_or_no_checks_is_insufficient_not_supported():
+    for checks in ([check("polybag_present_sealed", "UNCERTAIN")], []):
+        prep = record("PRP-1", checks=checks)
+        c = charge(charge_type=ChargeType.DAMAGED_IN_WAREHOUSE, amount="0.00")
+        d = run(c, [prep], rules=RULES_UNSOURCED)
+        assert d.decision == Decision.REVIEW and d.rule_id == "R_INSUFFICIENT", checks
+        assert d.evidence_status == EvidenceStatus.INSUFFICIENT
+        assert not any(x.role == "supports" for x in d.citations)
+
+
+def test_lost_inbound_later_return_of_a_different_item_is_not_a_sighting():
+    ret = record(
+        "RTN-1",
+        agent="returns",
+        fba_shipment_id=None,
+        captured=datetime(2026, 6, 29, tzinfo=UTC),
+        checks=[check("identity_match", "FAIL")],
+    )
+    d = run(_lost_line(posted=date(2026, 6, 19)), [prep_all_pass(), ret])
+    assert d.decision == Decision.REVIEW and d.rule_id == "R_INSUFFICIENT"
+    assert d.evidence_status == EvidenceStatus.INSUFFICIENT
+
+
 def test_damaged_prep_with_failed_check_is_insufficient():
     prep = record("PRP-1", checks=[check("fnsku_label_placement", "FAIL")])
     c = charge(charge_type=ChargeType.DAMAGED_IN_WAREHOUSE, amount="14.00")
@@ -520,9 +557,7 @@ def test_refuting_rows_never_suggest_an_override_to_claim():
         for row in mapping.outcomes.values():
             if row.amount_needed:
                 continue
-            assert row.next_action is None or not any(w in row.next_action for w in CLAIM_WORDS), (
-                row.rule_id
-            )
+            assert not _steers_to_claim(row.next_action), (row.rule_id, row.next_action)
 
 
 # --- weight tier and unresolved -------------------------------------------------------

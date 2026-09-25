@@ -75,7 +75,7 @@ loss_event_outcomes:
         evidence_status: CONTRADICTED
         decision: DO_NOT_CLAIM
         rule_id: R_ITEM_RETURNED
-        reason: "the ordered item was returned complete and in sellable condition, so nothing is owed for a non-return"
+        reason: "the ordered item was returned with identity, parts and condition all PASS, so nothing is owed for a non-return"
       # Identity PASS but parts FAIL/not recorded, or condition FAIL/UNCERTAIN/not recorded:
       # the item came back, but a returns claim for its condition or missing parts may exist.
       returned_incomplete_or_damaged:
@@ -83,7 +83,7 @@ loss_event_outcomes:
         decision: REVIEW
         rule_id: R_RETURNED_INCOMPLETE_OR_DAMAGED
         reason: "item returned; incomplete, damaged or condition uncertain; possible separate claim"
-        next_action: "The item came back, so do not claim a non-return. Check the photos and parts list; if the item is damaged or incomplete, decide on a separate returns claim within its own window."
+        next_action: "The item came back, so do not claim a non-return. Check the photos and parts list for damage or missing parts; filing for those needs a channel rule not yet sourced in config/rules."
       # Identity FAIL: a different item came back, so the ordered item was not returned.
       # Supports the seller's claim; REVIEW until an amount is computable.
       wrong_item_returned:
@@ -103,24 +103,25 @@ loss_event_outcomes:
         rule_id: R_AMOUNT_NOT_COMPUTABLE
         amount_needed: true
         reason: "the unit was prepared for this shipment and no later record shows it, consistent with the loss"
-      # A final record shows the unit after the loss was posted (e.g. a customer return):
-      # the loss is doubtful. Never a claim.
+      # A final customer return of the unit after the loss, identity PASS: the loss is
+      # doubtful. Never a claim.
       later_sighting:
         evidence_status: CONTRADICTED
         decision: REVIEW
         rule_id: R_LOSS_DOUBTFUL
         reason: "the unit was seen after the loss was posted, so the loss is doubtful"
-        next_action: "Do not claim this loss. Check whether the channel found or reconciled the unit; claim only if the later record is shown to be a different unit."
+        next_action: "Do not claim this loss. If the later return is linked to the wrong unit, correct the upstream record and re-run."
   damaged_in_warehouse:
     outcomes:
-      # Prep recorded the unit leaving with no failed check: it was undamaged before the
-      # warehouse, consistent with warehouse damage. REVIEW until an amount is computable.
+      # A final prep record with every check PASS: the unit left prep sound, consistent with
+      # warehouse damage. REVIEW until an amount is computable. Any FAIL or UNCERTAIN check,
+      # or no checks, is INSUFFICIENT (generic rule), not this row.
       left_prep_undamaged:
         evidence_status: SUPPORTED
         decision: REVIEW
         rule_id: R_AMOUNT_NOT_COMPUTABLE
         amount_needed: true
-        reason: "the unit left prep with no failed check, consistent with damage in the warehouse"
+        reason: "the unit left prep with every check passed, consistent with damage in the warehouse"
 
 duplicate:
   # Two fee lines with the same fingerprint posted this many days apart or less are

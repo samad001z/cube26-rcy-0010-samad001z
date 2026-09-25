@@ -171,8 +171,9 @@ def assess_lost_inbound(
     charge: Charge, usable: Sequence[EvidenceRecord], cfg: EngineConfig, rules: ChannelRules
 ) -> Assessment:
     """The line asserts the unit was lost inbound. Prep on the shipment is consistent with it
-    (supports); a final record of the unit after the loss (a customer return) says the line
-    is wrong (contradicts), whatever prep shows."""
+    (supports); a final customer return of the unit after the loss, identity PASS, says the
+    line is wrong (contradicts), whatever prep shows. A return whose identity is FAIL,
+    UNCERTAIN or not recorded cannot settle it (uncertain)."""
     findings: list[Finding] = []
     for r in usable:
         if r.agent == "prep":
@@ -186,12 +187,18 @@ def assess_lost_inbound(
                 )
             )
         elif r.agent == "returns":
+            # Only a final return whose identity check PASSes shows this unit after the loss.
+            identity = next((c.verdict for c in r.checks if c.check_key == "identity_match"), None)
+            seen = not _pending(r) and identity == Verdict.PASS
             findings.append(
                 Finding(
                     r,
-                    (),
-                    "uncertain" if _pending(r) else "contradicts",
-                    f"{r.record_id}: unit returned by a customer after the loss was posted",
+                    ("identity_match",) if identity is not None else (),
+                    "contradicts" if seen else "uncertain",
+                    f"{r.record_id}: unit returned by a customer after the loss was posted"
+                    if seen
+                    else f"{r.record_id}: a return after the loss, but identity_match="
+                    f"{identity.value if identity else 'not recorded'} or record not final",
                 )
             )
     if not findings:
@@ -221,24 +228,33 @@ def assess_lost_inbound(
 def assess_damaged_in_warehouse(
     charge: Charge, usable: Sequence[EvidenceRecord], cfg: EngineConfig, rules: ChannelRules
 ) -> Assessment:
-    """The line asserts the unit was damaged in the warehouse. Prep recording the unit leave
-    with no failed check is consistent with it (supports); a failed prep check means it may
-    have arrived damaged, which cannot settle the line (uncertain)."""
+    """The line asserts the unit was damaged in the warehouse. A final prep record with at
+    least one check, every one PASS, shows the unit left prep sound: consistent with the line
+    (supports). A failed or uncertain check, no checks, or a pending record cannot settle it
+    (uncertain): the unit may have arrived damaged, or prep shows nothing."""
     findings: list[Finding] = []
     for r in usable:
-        fails = [c.check_key for c in r.checks if c.verdict == Verdict.FAIL]
-        if _pending(r) or fails:
-            detail = f"{r.record_id}: prep recorded {', '.join(fails) or 'pending review'}"
-            findings.append(Finding(r, tuple(sorted(fails)), "uncertain", detail))
-        else:
+        v = {c.check_key: c.verdict for c in r.checks}
+        if not _pending(r) and v and all(x == Verdict.PASS for x in v.values()):
             findings.append(
                 Finding(
                     r,
-                    tuple(sorted(c.check_key for c in r.checks)),
+                    tuple(sorted(v)),
                     "supports",
-                    f"{r.record_id}: unit left prep with no failed check",
+                    f"{r.record_id}: unit left prep with every check passed ({_fmt(v)})",
                 )
             )
+            continue
+        open_ = sorted(k for k, x in v.items() if x != Verdict.PASS)
+        if _pending(r):
+            state = f"record status {r.status.value}"
+        elif not v:
+            state = "no checks recorded"
+        else:
+            state = ", ".join(f"{k}={v[k].value}" for k in open_)
+        findings.append(
+            Finding(r, tuple(open_), "uncertain", f"{r.record_id}: prep recorded {state}")
+        )
     return _combine(
         findings, "no prep record for this unit on this shipment", supports="left_prep_undamaged"
     )

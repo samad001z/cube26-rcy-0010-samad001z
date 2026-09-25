@@ -60,7 +60,10 @@ def run(
     as_json: Annotated[bool, typer.Option("--json", help="Print decision records as JSON")] = False,
 ) -> None:
     """Ingest, decide every charge for one organisation, persist and print the decisions."""
-    when = date.fromisoformat(as_of) if as_of else datetime.now(UTC).date()
+    try:
+        when = date.fromisoformat(as_of) if as_of else datetime.now(UTC).date()
+    except ValueError as exc:
+        raise typer.BadParameter("expected a date as YYYY-MM-DD", param_hint="--as-of") from exc
     secret = get_settings().attachment_key_secret.get_secret_value()
     engine = get_engine()
     ingest_org(engine, org, report, upstream, secret)

@@ -1,5 +1,7 @@
 """The decision pipeline against real Postgres, connected as the non-superuser app role."""
 
+import re
+from collections import Counter
 from datetime import UTC, date, datetime
 
 import pytest
@@ -7,10 +9,12 @@ import sqlalchemy as sa
 from sqlalchemy import Engine, text
 from typer.testing import CliRunner
 
-from app import cli
+from app import cli, pipeline
 from app.adapters.csv_v0 import load_fee_report
+from app.claims.validator import validate
 from app.core.config import REPO_ROOT, get_settings
 from app.core.hashing import content_hash
+from app.core.rules import load_engine_config
 from app.db import repo
 from app.db import tables as t
 from app.db.session import org_session
@@ -62,6 +66,7 @@ def test_stored_decisions_match_their_columns(app_engine, loaded):
 
 
 def test_every_cited_record_exists_in_the_same_org_with_the_cited_hash(app_engine, loaded):
+    checked = 0
     for org in (ALPHA, BRAVO):
         with org_session(app_engine, org) as s:
             for d in _latest_run(app_engine, org):
@@ -69,6 +74,11 @@ def test_every_cited_record_exists_in_the_same_org_with_the_cited_hash(app_engin
                     if c.kind == "evidence":
                         found = repo.get_record_with_hash(s, c.id)
                         assert found is not None and found[1] == c.content_hash
+                    else:
+                        ch = repo.get_charge(s, c.id)
+                        assert ch is not None and ch.compute_hash() == c.content_hash
+                    checked += 1
+    assert checked == 22  # snapshot: 9 on inbound defect fees + 13 on loss events
 
 
 def test_bravo_cannot_read_alpha_decisions_by_record_id(app_engine, loaded):
@@ -181,69 +191,160 @@ def test_engine_failure_on_one_charge_fails_open_and_keeps_every_charge(
     assert "RUN_STARTED" in kinds and "RUN_COMPLETED" in kinds
 
 
-def test_database_refuses_a_claim_row_without_a_positive_amount(app_engine, loaded):
-    d = _latest_run(app_engine, ALPHA)[0]
+def _forged_row(d: DecisionRecord, decision: str, amount: str | None) -> dict[str, object]:
     body = d.model_dump(mode="json")
-    with pytest.raises(sa.exc.IntegrityError), org_session(app_engine, ALPHA) as s:
-        s.execute(
-            sa.insert(t.decisions).values(
-                organization_id=ALPHA,
-                run_id=d.run_id,
-                record_id="DEC-forged",
-                line_id="FORGED",
-                decision="CLAIM",
-                evidence_status="CONTRADICTED",
-                rule_id="R_X",
-                status="final",
-                claim_amount=None,
-                content_hash=content_hash(body),
-                body=body,
-                decided_at=d.captured_at,
-            )
-        )
+    return dict(
+        organization_id=ALPHA,
+        run_id=d.run_id,
+        record_id=f"DEC-forged-{decision}",
+        line_id="FORGED",
+        decision=decision,
+        evidence_status="CONTRADICTED",
+        rule_id="R_X",
+        status="final",
+        claim_amount=amount,
+        content_hash=content_hash(body),
+        body=body,
+        decided_at=d.captured_at,
+    )
+
+
+@pytest.mark.parametrize(
+    ("decision", "amount"), [("CLAIM", None), ("CLAIM", "0.00"), ("REVIEW", "1.00")]
+)
+def test_database_refuses_claim_amount_inconsistent_with_decision(
+    app_engine, loaded, decision, amount
+):
+    d = _latest_run(app_engine, ALPHA)[0]
+    with (
+        pytest.raises(sa.exc.IntegrityError, match="ck_decisions_claim_amount"),
+        org_session(app_engine, ALPHA) as s,
+    ):
+        s.execute(sa.insert(t.decisions).values(**_forged_row(d, decision, amount)))
+
+
+def test_duplicate_charge_claim_cites_canonical_charge_read_back_from_postgres(app_engine, loaded):
+    org = "org_test_duplicate"
+    first = charge("DUP-1", org=org, posted=date(2026, 7, 1))
+    second = charge("DUP-2", org=org, posted=date(2026, 7, 5))
+    with org_session(app_engine, org) as s:
+        fid = repo.upsert_ingest_file(s, org, "dup.csv", "c" * 64, "fee_report")
+        repo.insert_charges(s, [first, second], fid)
+    by_line = {d.subject.line_id: d for d in run_org(app_engine, org, AS_OF).decisions}
+    d = by_line["DUP-2"]
+    assert d.decision == Decision.CLAIM and d.status == RecordStatus.FINAL
+    assert d.reason_code is not None and d.reason_code.value == "DUPLICATE_CHARGE"
+    assert [(c.kind, c.id, c.role) for c in d.citations] == [
+        ("charge", "DUP-1", "canonical_charge")
+    ]
+    assert by_line["DUP-1"].decision == Decision.REVIEW  # the canonical line has no evidence
+
+
+def test_citation_of_another_orgs_record_is_not_found_under_rls(app_engine, loaded):
+    alpha_claim = next(
+        d for d in _latest_run(app_engine, ALPHA) if any(c.kind == "evidence" for c in d.citations)
+    )
+    with org_session(app_engine, ALPHA) as s:
+        alpha_charge = repo.get_charge(s, alpha_claim.subject.line_id)
+    assert alpha_charge is not None
+    # Validate the alpha decision from a bravo session: every alpha row is invisible.
+    with org_session(app_engine, BRAVO) as s:
+        errors = validate(alpha_claim, alpha_charge, pipeline.DbLookup(s), load_engine_config())
+    cited = [c.id for c in alpha_claim.citations if c.kind == "evidence"]
+    assert f"cited record {cited[0]} not found" in errors
+    assert "charge belongs to another organisation" not in errors  # same org as decision
+    assert any("not found in the store" in e for e in errors)
 
 
 # --- CLI ------------------------------------------------------------------------------
 
 
-def test_cli_run_prints_a_decision_with_evidence_and_reason_for_every_line(
-    app_engine, loaded, monkeypatch
-):
+def _invoke_cli(app_engine, monkeypatch, *args: str):
     monkeypatch.setattr(cli, "get_engine", lambda: app_engine)
     monkeypatch.setenv("DATABASE_URL", "unused")
     monkeypatch.setenv("MIGRATION_DATABASE_URL", "unused")
     monkeypatch.setenv("ATTACHMENT_KEY_SECRET", "test-secret")
     get_settings.cache_clear()
     try:
-        out = CliRunner().invoke(
-            cli.app,
-            [
-                "run",
-                "--report",
-                str(DATA / "fee_report_sample.csv"),
-                "--upstream",
-                str(DATA / "upstream"),
-                "--org",
-                BRAVO,
-                "--as-of",
-                "2026-09-25",
-            ],
-        )
+        return CliRunner().invoke(cli.app, list(args))
     finally:
         get_settings.cache_clear()
+
+
+RUN_ARGS = (
+    "run",
+    "--report",
+    str(DATA / "fee_report_sample.csv"),
+    "--upstream",
+    str(DATA / "upstream"),
+)
+
+
+@pytest.mark.parametrize("org", [ALPHA, BRAVO])
+def test_cli_prints_every_line_matching_the_stored_decision_with_evidence_and_reason(
+    app_engine, loaded, monkeypatch, org
+):
+    out = _invoke_cli(app_engine, monkeypatch, *RUN_ARGS, "--org", org, "--as-of", "2026-09-25")
     assert out.exit_code == 0, out.output
+    run_id = re.search(r"  run ([0-9a-f-]{36})  ", out.output)
+    assert run_id is not None
+    with org_session(app_engine, org) as s:
+        stored = {d.subject.line_id: d for d in repo.list_decisions(s, run_id.group(1))}
     fees = load_fee_report(DATA / "fee_report_sample.csv")
-    bravo_lines = [c.line_id for c in fees.charges if c.organization_id == BRAVO]
-    blocks = out.output.split("\n\n")
-    for line_id in bravo_lines:
-        block = next(b for b in blocks if b.startswith(line_id + "  "))
-        assert "  reason:   " in block
-        assert "  evidence: " in block
-        assert "  checks:   " in block
-        assert any(x in block for x in ("-> CLAIM", "->  CLAIM", "DO_NOT_CLAIM", "REVIEW"))
-    assert f"decisions: {len(bravo_lines)}" in out.output
-    assert not any(line.startswith("FEE-0002-1") for line in out.output.splitlines())  # alpha
+    expected = {c.line_id for c in fees.charges if c.organization_id == org}
+    assert set(stored) == expected
+
+    blocks = {b.split("  ", 1)[0]: b for b in out.output.split("\n\n") if b.startswith("FEE-")}
+    assert set(blocks) == expected  # one printed block per line, no other org's lines
+    for line_id, d in stored.items():
+        block = blocks[line_id]
+        head = block.splitlines()[0]
+        assert f"->  {d.decision.value} ({d.evidence_status.value})  {d.rule_id}" in head
+        assert f"  reason:   {d.reason}" in block
+        if d.citations:
+            for c in d.citations:
+                short = c.content_hash[:12]
+                assert f"  evidence: {c.kind} {c.id} (sha256:{short}) {c.role}" in block
+        else:
+            assert "  evidence: none cited" in block
+        for r in d.evidence_considered:
+            assert r.record_id in block
+        assert (
+            "  checks:   " + " ".join(f"{c.check_key}={c.verdict.value}" for c in d.checks) in block
+        )
+        assert f"  record:   {d.record_id}" in block
+    assert f"decisions: {len(expected)}  " in out.output
 
 
-def test_as_of_is_required_to_be_a_date():
-    assert date.fromisoformat("2026-09-25") == AS_OF
+def test_cli_rejects_a_bad_as_of_date(app_engine, loaded, monkeypatch):
+    out = _invoke_cli(app_engine, monkeypatch, *RUN_ARGS, "--org", ALPHA, "--as-of", "25/09/2026")
+    assert out.exit_code == 2
+    assert "YYYY-MM-DD" in out.output
+
+
+# --- regression snapshot --------------------------------------------------------------
+
+# Rule counts the current engine produces on the sample (2026-09-25). This is a regression
+# snapshot of engine behaviour, NOT ground truth: correctness is measured by the human-
+# labelled eval set (Day 3). Any change here must be explained and approved by the human.
+SAMPLE_RULE_COUNTS = {
+    ALPHA: {
+        "R_NO_RELEVANT_EVIDENCE": 25,
+        "R_AMOUNT_NOT_COMPUTABLE": 8,
+        "R_DEFECT_CATEGORY_MISSING": 6,
+        "R_INSUFFICIENT": 1,
+    },
+    BRAVO: {
+        "R_NO_RELEVANT_EVIDENCE": 17,
+        "R_AMOUNT_NOT_COMPUTABLE": 2,
+        "R_DEFECT_CATEGORY_MISSING": 1,
+        "R_INSUFFICIENT": 1,
+    },
+}
+
+
+@pytest.mark.parametrize("org", [ALPHA, BRAVO])
+def test_sample_rule_counts_snapshot(app_engine, loaded, org):
+    decisions = _latest_run(app_engine, org)
+    assert dict(Counter(d.rule_id for d in decisions)) == SAMPLE_RULE_COUNTS[org]
+    assert all(d.decision == Decision.REVIEW for d in decisions)  # 0 CLAIM on the sample

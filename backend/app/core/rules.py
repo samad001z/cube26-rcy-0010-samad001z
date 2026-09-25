@@ -108,6 +108,9 @@ class PodRelevance(_Strict):
 
 class ChargeTypeConfig(_Strict):
     kind: Literal["fee", "loss_event"]
+    # full_amount: the whole fee; fee_difference: charged - correct fee (needs the fee
+    # schedule); unit_value: needs an authoritative unit value (none in upstream data).
+    claim_basis: Literal["full_amount", "fee_difference", "unit_value"]
     pods: dict[PodName, PodRelevance]
     scope_checks: list[str] = Field(default_factory=list)
     required_checks: list[str] = Field(default_factory=list)

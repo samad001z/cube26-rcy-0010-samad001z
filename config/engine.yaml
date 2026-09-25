@@ -11,6 +11,8 @@
 charge_types:
   inbound_defect_fee:
     kind: fee
+    # full_amount: a fee that should not have been charged is recoverable in full.
+    claim_basis: full_amount
     pods:
       prep: {window: before_posting, max_days_before: 120, match_keys: [fba_shipment_id]}
     # Prep checks in scope when the line names no defect category ("prep/label scope").
@@ -18,12 +20,15 @@ charge_types:
                    original_barcode_covered, expiry_date, handling_marks]
   fulfilment_fee_weight_tier:
     kind: fee
+    # fee_difference: recoverable = fee charged - correct fee; needs the sourced fee schedule.
+    claim_basis: fee_difference
     pods:
       prep: {window: before_posting, max_days_before: 120, match_keys: [fba_shipment_id]}
     # Evidence that can speak to a weight-tier fee. No upstream pod records these today.
     required_checks: [measured_weight, measured_dimensions]
   lost_inbound:
     kind: loss_event
+    claim_basis: unit_value
     pods:
       # A prep record on the same FBA shipment shows the unit was prepared for that shipment.
       prep: {window: before_posting, max_days_before: 120, match_keys: [fba_shipment_id]}
@@ -32,10 +37,12 @@ charge_types:
     # Receiving is deliberately not relevant: a supplier shortfall is not a channel loss.
   damaged_in_warehouse:
     kind: loss_event
+    claim_basis: unit_value
     pods:
       prep: {window: before_posting, max_days_before: 120, match_keys: [fba_shipment_id]}
   refund_issued_item_not_returned:
     kind: loss_event
+    claim_basis: unit_value
     pods:
       returns: {window: around_posting, max_days_before: 60, max_days_after: 60,
                 match_keys: [order_id]}

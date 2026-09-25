@@ -52,4 +52,4 @@ Agencies are paid a percentage of what they recover, so the incentive is volume.
 We will report the number we measure, broken down by charge type, including where it fails. If two human labellers can't agree on the right verdict, we'll report that too, because it means the task itself is ambiguous.
 
 **What happens to a claim on a unit whose evidence is changed later?**
-Every record Alibi cites is stored with a content hash, so we can show whether the record it used is the one you're looking at now. That is a content hash, not a tamper-proof ledger.
+Every record Alibi cites is stored with a content hash, so we can show whether the record it used is the one you're looking at now. A content hash shows whether a record changed; it does not stop anyone with database owner access from changing it.

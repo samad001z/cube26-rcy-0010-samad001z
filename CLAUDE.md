@@ -1,6 +1,6 @@
 # CLAUDE.md: Alibi (Recovery Manager), Cube Buildathon Round 2
 
-Read this file fully at the start of every session, then `docs/ROUND2_PLAN.md` (current schedule and scope, overrides older docs) and `docs/PROGRESS.md`. Design notes live in `docs/design/` (written before the Round 2 rules were published; where they conflict with this file or ROUND2_PLAN.md, this file wins).
+Read this file fully at the start of every session, then `docs/ROUND2_PLAN.md` (current schedule and scope, overrides older docs) and `docs/PROGRESS.md`. The pre-Round-2 design notes are archived in `docs/archive/pre-round2-design/` (history only, not a description of what was built; this file, ROUND2_PLAN.md and ARCHITECTURE.md supersede them). The PRD lives in `docs/product/PRD.md`.
 
 ## What we are building
 
@@ -63,7 +63,7 @@ eval/            held-out eval set, human labels, eval harness, reports
 datagen/         optional adversarial case generator (never imported by backend)
 frontend/
 config/rules/    authoritative rules with source URLs
-docs/            ROUND2_PLAN.md, PROGRESS.md, DECISIONS.md, design/, product/
+docs/            ROUND2_PLAN.md, PROGRESS.md, DECISIONS.md, product/, reviews/, archive/
 README.md  ARCHITECTURE.md  CLAUDE.md
 ```
 

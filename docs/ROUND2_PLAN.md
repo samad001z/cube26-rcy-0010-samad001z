@@ -1,4 +1,4 @@
-# Round 2 plan (overrides schedules and deliverables in docs/design/)
+# Round 2 plan (overrides schedules and deliverables in docs/archive/pre-round2-design/)
 
 ## Source of truth
 The Round 2 rules were published in open PRs #1-#6 on the organiser repo (individual build, fork workflow, deadline 1 Oct 2026 18:00 IST). Confirmation requested in issue #15. Until an organiser says otherwise, this plan follows those rules.

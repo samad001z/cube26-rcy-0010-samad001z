@@ -1,7 +1,7 @@
 # DECISIONS (lightweight ADRs)
 
 ### D-001 Rules decide, LLM parses and writes
-Status: accepted. Reason: reproducibility, injection resistance, testability. See 06_LLM_LAYER.md.
+Status: accepted. Reason: reproducibility, injection resistance, testability. See docs/archive/pre-round2-design/06_LLM_LAYER.md (history only).
 
 ### D-002 Keyed relational retrieval, no vector store
 Status: accepted. Reason: exact entity matching; semantic retrieval causes sibling-SKU false matches.

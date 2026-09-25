@@ -1,6 +1,6 @@
 ---
 name: rules-guardian
-description: Reviews changes to engine/, claims/, agent/ and llm/ against the non-negotiable rules in CLAUDE.md and the design notes in docs/design/05, 06, 13, 14 (older; CLAUDE.md and docs/ROUND2_PLAN.md win on any conflict). Use after any phase that touches decision logic, amounts, citations, prompts or agent tools.
+description: Reviews changes to engine/, claims/, agent/ and llm/ against the non-negotiable rules in CLAUDE.md, the rule table in ARCHITECTURE.md and docs/DECISIONS.md. The archived pre-Round-2 notes in docs/archive/pre-round2-design/ are history only. Use after any phase that touches decision logic, amounts, citations, prompts or agent tools.
 tools: Read, Grep, Glob, Bash
 ---
 
@@ -14,7 +14,7 @@ Review the current diff (`git diff main...HEAD`) and report violations only. Che
 4. Claims that can bypass `validate_claim`.
 5. Evidence matched by fuzzy/semantic similarity instead of exact keys.
 6. Records captured after the custody point producing CONTRADICTS.
-7. Rules in code that differ from the table in docs/design/05_DECISION_ENGINE.md, after checking CLAUDE.md (order, conditions, ids).
+7. Rules in code that differ from the rule table in ARCHITECTURE.md and the entries in docs/DECISIONS.md, after checking CLAUDE.md (order, conditions, ids).
 8. Edits to fixtures/, ground truth, or expected outputs.
 9. Special-casing of specific IDs, mocks in eval paths, TODO stubs in MUST paths, swallowed exceptions.
 10. Evidence or note text passed to an LLM without data delimiters.

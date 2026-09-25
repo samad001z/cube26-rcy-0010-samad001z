@@ -7,7 +7,7 @@ from pathlib import Path
 
 from sqlalchemy import Engine
 
-from app.adapters.csv_v0 import file_sha256, load_fee_report, load_upstream
+from app.adapters.csv_v0 import file_sha256, load_config, load_fee_report, load_upstream, pod_file
 from app.db import repo
 from app.db import tables as t
 from app.db.session import org_session
@@ -32,7 +32,8 @@ def ingest_org(
     engine: Engine, org: str, report: Path, upstream: Path, secret: str
 ) -> IngestSummary:
     fees = load_fee_report(report)
-    ups = load_upstream(upstream, secret)
+    adapter_cfg = load_config()
+    ups = load_upstream(upstream, secret, adapter_cfg)
 
     charges = [c for c in fees.charges if c.organization_id == org]
     records = [r for r in ups.records if r.organization_id == org]
@@ -52,9 +53,7 @@ def ingest_org(
         summary.charges_inserted = repo.insert_charges(session, charges, fee_file)
         for pod in PODS:
             pod_records = [r for r in records if r.agent == pod]
-            pod_path = next(
-                p for p in upstream.glob(f"{pod}_*.csv")
-            )  # file names come from config/adapters/csv_v0.yaml
+            pod_path = pod_file(upstream, pod, adapter_cfg["pods"][pod])
             file_id = repo.upsert_ingest_file(
                 session, org, pod_path.name, file_sha256(pod_path), pod
             )

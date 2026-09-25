@@ -226,6 +226,20 @@ def _build_record(
     return record, attachments
 
 
+def pod_file(directory: Path, pod: str, pod_cfg: dict[str, Any]) -> Path:
+    """The pod's CSV in `directory`: the configured file name if present, else the single
+    `<pod>_*.csv` there. Zero or several candidates is an error, never a guess."""
+    configured = directory / str(pod_cfg["file"])
+    if configured.is_file():
+        return configured
+    found = sorted(directory.glob(f"{pod}_*.csv"))
+    if len(found) != 1:
+        raise FileNotFoundError(
+            f"expected exactly one {pod}_*.csv in {directory}, found {len(found)}"
+        )
+    return found[0]
+
+
 def load_upstream(
     directory: Path, secret: str, config: dict[str, Any] | None = None
 ) -> UpstreamLoad:
@@ -233,7 +247,7 @@ def load_upstream(
     result = UpstreamLoad()
     seen: set[tuple[str, str, str]] = set()
     for pod, pod_cfg in cfg["pods"].items():
-        path = directory / pod_cfg["file"]
+        path = pod_file(directory, pod, pod_cfg)
         file_hash = file_sha256(path)
         with path.open(newline="", encoding="utf-8") as fh:
             for n, row in enumerate(csv.DictReader(fh), start=1):

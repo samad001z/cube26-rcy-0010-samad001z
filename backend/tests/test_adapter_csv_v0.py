@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from app.adapters.csv_v0 import load_config, load_fee_report, load_upstream
+from app.adapters.csv_v0 import load_config, load_fee_report, load_upstream, pod_file
 from app.core.config import REPO_ROOT
 from app.models.vocab import RecordStatus, Verdict
 
@@ -210,3 +210,14 @@ def test_optional_defect_category_column(tmp_path, fees):
     p.write_text("\n".join(rows) + "\n")
     res = load_fee_report(p)
     assert [c.defect_category for c in res.charges] == ["label", None]
+
+
+def test_pod_files_are_found_by_pod_prefix_and_ambiguity_is_refused(tmp_path: Path) -> None:
+    cfg = load_config()
+    src = REPO_ROOT / "data" / "upstream"
+    for pod in ("receiving", "prep", "pack", "returns"):
+        shutil.copy(src / f"{pod}_sample.csv", tmp_path / f"{pod}_eval.csv")
+    assert pod_file(tmp_path, "prep", cfg["pods"]["prep"]).name == "prep_eval.csv"
+    shutil.copy(src / "prep_sample.csv", tmp_path / "prep_other.csv")
+    with pytest.raises(FileNotFoundError, match="exactly one prep"):
+        pod_file(tmp_path, "prep", cfg["pods"]["prep"])

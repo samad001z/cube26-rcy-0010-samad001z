@@ -451,3 +451,16 @@ def test_run_reports_latency_for_every_charge(app_engine, loaded):
     result = run_org(app_engine, org, AS_OF)
     assert set(result.latency_ms) == {d.subject.line_id for d in result.decisions}
     assert all(ms > 0 for ms in result.latency_ms.values())
+
+
+def test_run_refuses_a_custody_window_that_closes_before_the_filing_window(app_engine, loaded):
+    import yaml
+
+    from app.core.rules import ENGINE_PATH, parse_engine_config
+
+    data = yaml.safe_load(ENGINE_PATH.read_text())
+    data["charge_types"]["refund_issued_item_not_returned"]["pods"]["returns"]["max_days_after"] = (
+        60
+    )
+    with pytest.raises(ValueError, match="before the sourced filing window closes"):
+        run_org(app_engine, ALPHA, AS_OF, cfg=parse_engine_config(data))

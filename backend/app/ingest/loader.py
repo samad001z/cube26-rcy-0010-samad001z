@@ -38,12 +38,17 @@ def ingest_org(
     charges = [c for c in fees.charges if c.organization_id == org]
     records = [r for r in ups.records if r.organization_id == org]
     attachments = [a for a in ups.attachments if a.organization_id == org]
-    quarantined = fees.quarantined + ups.quarantined
+    # A bad row is kept only for the org it names (or when it names none, for the org that
+    # sent it); another org's bad row is skipped like its good rows.
+    all_quarantined = fees.quarantined + ups.quarantined
+    quarantined = [q for q in all_quarantined if (q.raw.get("org_id") or "").strip() in ("", org)]
     summary = IngestSummary(
         org=org,
         charges_total=len(charges),
         quarantined=len(quarantined),
-        skipped_other_org=(len(fees.charges) - len(charges)) + (len(ups.records) - len(records)),
+        skipped_other_org=(len(fees.charges) - len(charges))
+        + (len(ups.records) - len(records))
+        + (len(all_quarantined) - len(quarantined)),
     )
 
     with org_session(engine, org) as session:

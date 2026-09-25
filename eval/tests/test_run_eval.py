@@ -4,6 +4,7 @@ the agent while a disagreement is unresolved, and runs the real pipeline end to 
 The label files here are synthetic and live in temporary git repositories. No test reads
 eval/labels_A.csv or eval/labels_B.csv, and no test runs the agent on the eval set."""
 
+import csv
 import os
 import subprocess
 from collections import Counter
@@ -18,6 +19,11 @@ from metrics import agreement, build_gold
 SHEET = "case_id,charge_line,evidence_summary,label,reason\n1,x,y,,\n2,x,y,,\n3,x,y,,\n"
 
 
+def _read_rows(path: Path) -> list[dict[str, str]]:
+    with path.open(newline="", encoding="utf-8") as fh:
+        return list(csv.DictReader(fh))
+
+
 def _git(repo: Path, *args: str) -> None:
     subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
 
@@ -28,12 +34,17 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     _git(tmp_path, "config", "user.email", "t@example.org")
     _git(tmp_path, "config", "user.name", "t")
     (tmp_path / "sheet.csv").write_text(SHEET, encoding="utf-8")
+    _git(tmp_path, "add", "sheet.csv")
+    _git(tmp_path, "commit", "-qm", "sheet")
     monkeypatch.setattr(run_eval, "REPO_ROOT", tmp_path)
     monkeypatch.setattr(run_eval, "SHEET_CSV", tmp_path / "sheet.csv")
     monkeypatch.setattr(run_eval, "LABELS_A", tmp_path / "labels_A.csv")
     monkeypatch.setattr(run_eval, "LABELS_B", tmp_path / "labels_B.csv")
     monkeypatch.setattr(run_eval, "RESOLVED_CSV", tmp_path / "resolved.csv")
     monkeypatch.setattr(run_eval, "REPORT_MD", tmp_path / "REPORT.md")
+    # The synthetic sheet stands in for what eval/data produces; its data files are none.
+    monkeypatch.setattr(run_eval, "DATA_FILES", [])
+    monkeypatch.setattr(run_eval, "build_rows", lambda: _read_rows(tmp_path / "sheet.csv"))
 
     def must_not_run(*args: object, **kwargs: object) -> None:
         raise AssertionError("the agent must not run in this state")
@@ -177,3 +188,49 @@ def test_agent_run_and_report_end_to_end_on_the_development_sample():
     assert "## 4. Failure modes" in report and ids[0] in report
     assert "Model calls: 0" in report
     assert report.count("| agree |") + report.count("| disagree |") == 61
+
+
+def test_refuses_when_the_data_changed_after_labelling(repo, monkeypatch, capsys):
+    _labels(repo, "labels_A.csv", ["CLAIM", "REVIEW", "REVIEW"])
+    _labels(repo, "labels_B.csv", ["CLAIM", "REVIEW", "REVIEW"])
+    changed = _read_rows(repo / "sheet.csv")
+    changed[1]["evidence_summary"] = "Prep record ... FAIL"
+    monkeypatch.setattr(run_eval, "build_rows", lambda: changed)
+    assert run_eval.main() == run_eval.EXIT_REFUSED
+    assert "does not match what eval/data produces now" in capsys.readouterr().err
+
+
+def test_refuses_when_a_labeller_edited_the_evidence_column(repo, capsys):
+    _labels(repo, "labels_A.csv", ["CLAIM", "REVIEW", "REVIEW"])
+    _labels(repo, "labels_B.csv", ["CLAIM", "REVIEW", "REVIEW"])
+    text = (repo / "labels_B.csv").read_text().replace("2,x,y,", "2,x,y edited,", 1)
+    (repo / "labels_B.csv").write_text(text)
+    _git(repo, "commit", "-qam", "edit")
+    assert run_eval.main() == run_eval.EXIT_REFUSED
+    assert "labels_B.csv does not match" in capsys.readouterr().err
+
+
+def test_refuses_when_a_data_file_is_not_committed(repo, monkeypatch, capsys):
+    _labels(repo, "labels_A.csv", ["CLAIM", "REVIEW", "REVIEW"])
+    _labels(repo, "labels_B.csv", ["CLAIM", "REVIEW", "REVIEW"])
+    data = repo / "fee_report_eval.csv"
+    data.write_text("line_id\n1\n")
+    monkeypatch.setattr(run_eval, "DATA_FILES", [data])
+    assert run_eval.main() == run_eval.EXIT_REFUSED
+    assert "fee_report_eval.csv is not committed" in capsys.readouterr().err
+
+
+def test_a_charge_without_a_decision_fails_the_eval(repo, monkeypatch, capsys):
+    _labels(repo, "labels_A.csv", ["CLAIM", "REVIEW", "REVIEW"])
+    _labels(repo, "labels_B.csv", ["CLAIM", "REVIEW", "REVIEW"])
+    monkeypatch.setattr(run_eval, "run_agent", lambda *a, **k: run_eval.AgentRun({}, {}, 0, 0))
+    monkeypatch.setenv("EVAL_DATABASE_URL", "postgresql+psycopg://x@localhost/alibi_eval")
+    monkeypatch.setenv("EVAL_MIGRATION_DATABASE_URL", "postgresql+psycopg://x@localhost/alibi_eval")
+    assert run_eval.main() == run_eval.EXIT_DROPPED
+    assert "no decision for 1, 2, 3" in capsys.readouterr().err
+    assert not (repo / "REPORT.md").exists()
+
+
+def test_false_claim_gate():
+    assert run_eval.false_claim_gate(0) == 0
+    assert run_eval.false_claim_gate(1) == run_eval.EXIT_FALSE_CLAIMS == 4

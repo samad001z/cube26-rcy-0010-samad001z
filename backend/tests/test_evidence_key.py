@@ -7,7 +7,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.adapters.csv_v0 import attachment_key
-from app.claims.validator import validate
+from app.claims.validator import StoredRecord, validate
 from app.db import repo
 from app.db.session import org_session
 from app.models.charge import Charge, SourceRef
@@ -120,3 +120,19 @@ def test_same_record_id_in_two_pods_is_stored_twice_and_each_citation_resolves(a
         ("prep", SHARED_ID),
         ("returns", SHARED_ID),
     }
+
+
+class _WrongPodLookup(DictLookup):
+    """A store that answers a (pod, id) lookup with another pod's record of the same id."""
+
+    def evidence(self, agent: str, record_id: str) -> StoredRecord | None:
+        other = "returns" if agent == "prep" else "prep"
+        return self.records.get((other, record_id))
+
+
+def test_validator_fails_closed_if_the_store_returns_another_pods_record():
+    prep, ret = _pair()
+    c = _lost_line()
+    d = run(c, [prep, ret])
+    errors = validate(d, c, _WrongPodLookup([prep, ret], [c]), CFG)
+    assert f"cited record {SHARED_ID} resolved to another record" in errors

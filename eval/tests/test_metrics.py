@@ -33,6 +33,15 @@ def test_cohens_kappa_matches_a_hand_computed_example():
     assert ag.confusion[(C, R)] == 1 and ag.confusion[(R, D)] == 1 and ag.confusion[(D, R)] == 1
 
 
+def test_kappa_uses_each_labellers_own_marginals():
+    # A = [C, C, C, R], B = [C, R, R, R]: p_o = 2/4 = 0.5.
+    # p_e = p_A(C) p_B(C) + p_A(R) p_B(R) = 0.75*0.25 + 0.25*0.75 = 0.375.
+    # kappa = (0.5 - 0.375) / 0.625 = 0.2. (Using A's marginals twice would give p_e 0.625.)
+    ag = agreement({"1": C, "2": C, "3": C, "4": R}, {"1": C, "2": R, "3": R, "4": R})
+    assert ag.expected == Decimal("0.375")
+    assert ag.kappa == Decimal("0.200")
+
+
 def test_perfect_agreement_is_kappa_one_and_one_label_only_is_undefined():
     a = {"1": C, "2": R, "3": D}
     assert agreement(a, dict(a)).kappa == Decimal("1.000")

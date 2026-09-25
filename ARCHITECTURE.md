@@ -109,22 +109,29 @@ Contract fields (`record_id`, `schema_version` = `recovery_v1`, `organization_id
 `GET /health`: 200 `{"status": "ok", "db": "ok"}`, or 503 when the database is unreachable.
 
 `POST /agent` (multipart): `report` (one CSV), `upstream` (exactly one CSV per pod, named
-`receiving_*.csv`, `prep_*.csv`, `pack_*.csv`, `returns_*.csv`), optional `as_of`
-(YYYY-MM-DD). Response: the list of decision records, in the same JSON as
-`alibi run --json`. Headers: `X-Alibi-Run-Id`, `X-Alibi-Organization`,
-`X-Alibi-Rows-Skipped-Other-Org`, `X-Alibi-Rows-Quarantined`.
+`receiving_*.csv`, `prep_*.csv`, `pack_*.csv`, `returns_*.csv`). Response: the list of
+decision records, in the same JSON as `alibi run --json`. Headers: `X-Alibi-Run-Id`,
+`X-Alibi-Organization`, `X-Alibi-As-Of`, `X-Alibi-Rows-Skipped-Other-Org`,
+`X-Alibi-Rows-Quarantined`. Decisions are judged as of today (UTC); the caller cannot pick
+the date, because a past date would reopen an expired filing window (D-020). Replays at a
+chosen date use `alibi run --as-of`.
 
 - **Authentication:** header `X-API-Key`. `ALIBI_API_KEYS` holds `org_id:sha256(key)` pairs,
   hashes only (`alibi api-key --org <org>` makes a key). The presented key is hashed and
   compared with every configured hash using `hmac.compare_digest`. A missing, empty or
-  unknown key gets 401 before any file is read. A hash listed twice is refused, so a key
-  maps to one organisation.
+  unknown key gets 401 before any file is saved, ingested or written. (FastAPI parses the
+  multipart body before dependencies run, so the upload itself is received first; there is
+  no request-size limit in front of it yet, only the 10 MB per-file check after parsing.) A
+  hash listed twice is refused, so a key maps to one organisation.
 - **Tenancy:** the organisation comes only from the key. The endpoint declares no
   organisation field, so any `organization_id` in the form is ignored. Ingestion loads only
-  that organisation's rows; rows for other organisations are skipped and counted. Every read
+  that organisation's rows; rows for other organisations, including their malformed rows,
+  are skipped and counted, never stored under the caller. Every read
   and write runs in an `org_session` for that organisation, so forced RLS applies.
 - **Errors:** a malformed file gives 422, a file over 10 MB gives 413, a database failure
-  gives 503. A charge whose decision fails is still returned, as REVIEW with status pending
+  gives 503. The engine config is checked (`check_windows_consistent`) before anything is
+  written; a bad config gives 500 and stores nothing, so no charge is ever left without a
+  decision. A charge whose decision fails is still returned, as REVIEW with status pending
   (fail-open, inside the pipeline).
 - Tests: `backend/tests/test_api_agent.py` (Postgres). They cover: 401 for a missing or
   wrong key; alpha's key writes nothing under bravo; bravo's key sees none of alpha's lines,
@@ -134,8 +141,11 @@ Contract fields (`record_id`, `schema_version` = `recovery_v1`, `organization_id
 ## Evaluation harness
 
 `eval/` holds the held-out set, the labelling sheet and the harness. See `eval/README.md`.
-`make eval` refuses to run until both humans' label files are committed. It reports
+`make eval` refuses to run until both humans' label files are committed, and unless the
+eval data and the sheet are committed and still produce exactly what the labellers saw. It
+reports
 agreement (raw and Cohen's kappa) before resolution, and computes no agent metric while any
 disagreement is unresolved. It then runs the real pipeline on a freshly migrated
-`alibi_eval` database and writes `eval/REPORT.md`. Latency is measured per charge in
+`alibi_eval` database and writes `eval/REPORT.md`. It exits 4 if the agent made any false
+claim (the PRD's hard gate) and 5 if any charge got no decision. Latency is measured per charge in
 `run_org` (`RunResult.latency_ms`), outside the hashed decision record.

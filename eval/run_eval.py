@@ -3,7 +3,9 @@
     make eval        (cd backend && uv run python ../eval/run_eval.py)
 
 Refuses to run unless eval/labels_A.csv and eval/labels_B.csv exist, are committed to git
-with no uncommitted changes, and label every case. Then:
+with no uncommitted changes, and label every case; and unless the eval data and the sheet
+are committed and still produce exactly the charge lines and summaries the labellers saw.
+Then:
 
 1. raw agreement and Cohen's kappa between A and B, before any resolution;
 2. gold labels: the shared label where A and B agree, else the committed row of
@@ -13,6 +15,9 @@ with no uncommitted changes, and label every case. Then:
    (EVAL_MIGRATION_DATABASE_URL / EVAL_DATABASE_URL), as of common.AS_OF;
 4. eval/REPORT.md: claims, precision, false and missed claims, REVIEW rate, per charge type,
    latency, cost, failure modes and the per-case table.
+
+Exit codes: 0 done; 2 refused; 3 disagreements unresolved; 4 report written but the agent
+made at least one false claim (the PRD's hard gate); 5 a charge got no decision.
 """
 
 import csv
@@ -36,6 +41,7 @@ from app.models.decision import DecisionRecord
 from app.pipeline import run_org
 from common import (
     AS_OF,
+    DATA_DIR,
     LABELS,
     LABELS_A,
     LABELS_B,
@@ -46,6 +52,7 @@ from common import (
     SHEET_CSV,
     UPSTREAM_DIR,
 )
+from make_sheet import build_rows
 from metrics import (
     Agreement,
     Gold,
@@ -61,7 +68,11 @@ from metrics import (
 
 ORGS = ("org_demo_alpha", "org_demo_bravo")
 BACKEND = REPO_ROOT / "backend"
-EXIT_REFUSED, EXIT_UNRESOLVED = 2, 3
+EXIT_REFUSED, EXIT_UNRESOLVED, EXIT_FALSE_CLAIMS, EXIT_DROPPED = 2, 3, 4, 5
+# Inputs the labellers saw. They must be committed and unchanged, or the agent would be
+# scored on data nobody labelled.
+DATA_FILES = sorted(DATA_DIR.rglob("*.csv"))
+SHEET_COLUMNS = ("case_id", "charge_line", "evidence_summary")
 
 
 class EvalRefused(RuntimeError):
@@ -95,6 +106,31 @@ def require_committed(paths: list[Path], repo: Path = REPO_ROOT) -> str:
     if head.returncode != 0:
         raise EvalRefused("cannot read the git commit")
     return head.stdout.strip()
+
+
+def require_labels_match_data(label_paths: list[Path], expected: list[dict[str, str]]) -> None:
+    """Refuse unless the committed sheet and every label file show exactly the cases, charge
+    lines and evidence summaries that the eval data produces now (make_sheet.build_rows).
+    Catches data or sheet edits made after labelling."""
+
+    def view(rows: list[dict[str, str]]) -> list[tuple[str, ...]]:
+        return [tuple(r.get(c, "") for c in SHEET_COLUMNS) for r in rows]
+
+    want = view(expected)
+    for p in [SHEET_CSV, *label_paths]:
+        with p.open(newline="", encoding="utf-8") as fh:
+            got = view(list(csv.DictReader(fh)))
+        if got != want:
+            raise EvalRefused(
+                f"{p.name} does not match what eval/data produces now: the data or the sheet "
+                "changed after labelling (or a labeller edited a column other than label and "
+                "reason)"
+            )
+
+
+def false_claim_gate(false_claims: int) -> int:
+    """PRD success metric: false claim rate 0% is a hard gate. The report is still written."""
+    return EXIT_FALSE_CLAIMS if false_claims > 0 else 0
 
 
 def sheet_case_ids(path: Path = SHEET_CSV) -> list[str]:
@@ -167,6 +203,9 @@ def run_agent(
             ingest_s += time.perf_counter() - t0
             result = run_org(engine, org, AS_OF)
             for d in result.decisions:
+                if d.subject.line_id in decisions:
+                    # Cases are keyed by line_id; two orgs sharing one would overwrite a result.
+                    raise EvalRefused(f"line_id {d.subject.line_id} appears in two orgs")
                 decisions[d.subject.line_id] = d
             latency.update(result.latency_ms)
     finally:
@@ -423,7 +462,8 @@ def charge_types_of(report: Path = REPORT_CSV) -> dict[str, str]:
 
 def main() -> int:
     try:
-        commit = require_committed([LABELS_A, LABELS_B], REPO_ROOT)
+        commit = require_committed([LABELS_A, LABELS_B, SHEET_CSV, *DATA_FILES], REPO_ROOT)
+        require_labels_match_data([LABELS_A, LABELS_B], build_rows())
         ids = sheet_case_ids(SHEET_CSV)
         a, b = read_labels(LABELS_A, ids), read_labels(LABELS_B, ids)
         ag = agreement(a, b)
@@ -457,12 +497,20 @@ def main() -> int:
     except EvalRefused as exc:
         print(f"eval refused: {exc}", file=sys.stderr)
         return EXIT_REFUSED
+    dropped = sorted(set(gold.labels) - set(run.decisions))
+    if dropped:
+        # Rule 5: every charge gets a decision. A missing one is a failure, not a skip.
+        print(f"eval failed: no decision for {', '.join(dropped)}", file=sys.stderr)
+        return EXIT_DROPPED
     REPORT_MD.write_text(
         render_report(commit=commit, ag=ag, gold=gold, lab=lab, run=run, charge_types=types),
         encoding="utf-8",
     )
     print(f"wrote {REPORT_MD.relative_to(REPO_ROOT)}")
-    return 0
+    overall = score(gold.labels, {c: d.decision.value for c, d in run.decisions.items()})
+    if overall.false_claims:
+        print(f"false claims: {overall.false_claims} (hard gate, PRD)", file=sys.stderr)
+    return false_claim_gate(overall.false_claims)
 
 
 if __name__ == "__main__":

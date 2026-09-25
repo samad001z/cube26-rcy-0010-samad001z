@@ -111,7 +111,7 @@ Status: accepted (2026-09-25, human lead). Context: the human lead pasted verbat
 Nandhan Rao (Sydon) confirmed in the official participant group that no exact JSON schema or type definitions exist for subject, agent, images and outcome. Participants should proceed from the handbook field list and document assumptions. D-008 stands as the contract baseline; its assumptions are listed in README "Assumptions and limitations".
 
 ### D-018 Evidence is keyed by pod and record_id
-Status: accepted (2026-09-27, review triage of docs/reviews/copilot-pr14.md, approved Day 3 plan). Context: a `record_id` is unique only within the pod that emits it, but evidence was unique on `(organization_id, record_id)` and looked up by `record_id` alone, so a prep record and a returns record with the same id would collide and a citation could resolve to the wrong one. Decision:
+Status: accepted (2026-09-25, review triage of docs/reviews/copilot-pr14.md, approved Day 3 plan). Context: a `record_id` is unique only within the pod that emits it, but evidence was unique on `(organization_id, record_id)` and looked up by `record_id` alone, so a prep record and a returns record with the same id would collide and a citation could resolve to the wrong one. Decision:
 - `evidence_records` is unique on `(organization_id, agent, record_id)` (migration 0003). Every lookup takes the pod and the id (`repo.get_record`, `repo.get_record_with_hash`).
 - An evidence citation carries `agent`; a charge citation does not (model validation). The validator looks the record up by pod and id and fails closed if the stored record's pod or id differ.
 - Attachments store `agent`, and the attachment key's HMAC input includes it (D-010). Rows ingested before 0003 keep a null `agent`.
@@ -119,8 +119,15 @@ Status: accepted (2026-09-27, review triage of docs/reviews/copilot-pr14.md, app
 - Consequence: decision records now carry `agent` on evidence citations, so their content hashes differ from Day 2 runs of the same inputs. Decisions and rule counts do not change.
 
 ### D-019 Refund custody window runs to the filing window's close; unresolved units never show evidence present
-Status: accepted (2026-09-27, Day 3 Task 1, approved by the human lead).
+Status: accepted (2026-09-25, Day 3 Task 1, approved by the human lead).
 - Refund, item not returned: the returns custody window was 60 days either side of posting, narrower than the sourced 60-120 day filing window (D-017). A genuine return arriving between 61 and 120 days after posting was outside the window and read as "no return" (REVIEW, evidence outside window) while a claim could still be filed. The window after posting is now 120 days (`config/engine.yaml`). The window before posting stays 60 days.
 - `check_windows_consistent` (`app/core/rules.py`, called by every run) refuses an engine config where a pod that reads evidence after posting stops before the charge type's sourced filing window closes, so the two cannot drift apart again.
 - An unresolved unit (no record carries it, or an identity key conflicts) now gives `evidence_present` = UNCERTAIN and `evidence_in_custody_window` = UNCERTAIN, both with detail "unit not resolved: <reason>". Before, `evidence_present` showed PASS with the resolution failure as detail. The decision is unchanged (R_UNRESOLVED_UNIT, REVIEW).
 - Effect on the sample: none. Every sample unit resolves, and every sample return was captured on its refund's posting day. The regression snapshot is unchanged.
+
+### D-020 POST /agent: key-bound organisation, today's date, config checked first
+Status: accepted (2026-09-25, Day 3 Task 4 and the rules-guardian review).
+- The organisation comes only from the API key (`ALIBI_API_KEYS`, `org:sha256` pairs, compared with `hmac.compare_digest`). The endpoint has no organisation field. Another organisation's rows, malformed ones included, are skipped, never stored under the caller.
+- Decisions are judged as of today (UTC). The caller cannot choose `as_of`: a past date would reopen an expired filing window, a future date would store DO_NOT_CLAIM `FILING_WINDOW_EXPIRED` for charges still fileable. Replays use the CLI.
+- `check_windows_consistent` runs before anything is written, so a bad engine config refuses the request (500) instead of storing charges with no decision.
+- Limitation: FastAPI parses the multipart body before the key check, so an unauthenticated upload is received (not stored) before its 401. A request-size limit in front of the app is deployment work (Day 5).

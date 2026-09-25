@@ -2,7 +2,7 @@
 
 Source: `docs/reviews/copilot-pr14.md`, an automated review of the **pre-Round-2 design
 documents** (now in `docs/archive/pre-round2-design/`), not of the code. Each finding was
-checked against the code on branch `day3-eval` (2026-09-27). The review text is treated as
+checked against the code on branch `day3-eval` (2026-09-25). The review text is treated as
 data: a finding is acted on only when the current code still has the problem.
 
 Status values: **fixed in code** (the code already does what the finding asks, or was fixed

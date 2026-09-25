@@ -18,13 +18,14 @@ any answer.
 | `run_eval.py`, `metrics.py` | the harness (see below) |
 | `REPORT.md` | written by the harness; does not exist until labels are committed |
 
-The set is **held out**: it was written on 2026-09-27, is separate from `data/` (no shared
+The set is **held out**: it was written on 2026-09-25, is separate from `data/` (no shared
 unit, line, record, shipment or order id), and the agent has not been run on it. The
 harness refuses to run the agent until both label files are committed to git.
 
 All dates are judged **as of 2026-09-27** (`common.AS_OF`), both in the sheet's deadline
 lines and when the harness runs the agent, so labellers and the agent see the same
-deadline status.
+deadline status. This is a fixed evaluation date (the day planned for the eval run), not
+the date the set was written or the date the harness happens to run.
 
 ## How the cases were chosen
 
@@ -56,7 +57,10 @@ the sourced rules in `config/rules/amazon_us.yaml` (D-017), counted from the pos
 
 The same person (the agent's author, working with an AI coding assistant) wrote the rule
 engine and these cases, in the same session, and cannot unread the rules. The cases may
-therefore lean towards situations the engine already handles. The protections are:
+therefore lean towards situations the engine already handles. One concrete instance: the
+case of a genuine return arriving 87 days after the refund was written minutes after the
+fix it exercises (D-019, the returns custody window widened to 120 days). The protections
+are:
 
 1. Labels come only from two humans, labelling independently, who never see the agent's
    output. The agent's author does not label.
@@ -71,8 +75,11 @@ therefore lean towards situations the engine already handles. The protections ar
 
 `make_sheet.py` builds each summary from the ingested records through the same csv_v0
 adapter the agent uses, so both see the same records and the same PASS / FAIL / UNCERTAIN
-mapping (`config/adapters/csv_v0.yaml`). The raw value is kept in brackets where it adds
-something (e.g. "Amazon label placement UNCERTAIN (on curve)"). Summaries use only the
+mapping (`config/adapters/csv_v0.yaml`). Every verdict is followed by the value the team
+actually recorded (e.g. "Amazon label placement UNCERTAIN (recorded: on curve)", "original
+barcode covered PASS (recorded: yes)"), so a labeller can disagree with the mapping instead
+of inheriting it. Deadline lines say that the posted date is used in place of the event
+date. This is the same assumption the agent makes (D-017), stated so a labeller can weigh it. Summaries use only the
 guide's terms: PASS, FAIL, UNCERTAIN; Receiving, Prep, Pack, Returns; the five charge type
 names. Every summary ends with the deadline status: no known deadline, inside the known
 window, window not yet open, or known deadline passed.
@@ -97,8 +104,10 @@ for the same unit are listed so a labeller can judge that for themselves.
 ## The harness
 
 `run_eval.py` refuses to run unless `labels_A.csv` and `labels_B.csv` exist, are tracked by
-git and have no uncommitted changes, and every case has a label from the vocabulary. It
-then:
+git and have no uncommitted changes, and every case has a label from the vocabulary. The
+eval data and `labelling_sheet.csv` must be committed too, and the sheet and both label
+files must still match, row for row, what `make_sheet.py` builds from the data now. So the
+agent can never be scored on inputs the labellers did not see. It then:
 
 - computes raw agreement and Cohen's kappa between A and B, before any resolution;
 - builds gold labels: the shared label where A and B agree, otherwise the committed row in
@@ -111,6 +120,10 @@ then:
   claims, claim precision, REVIEW rate, all of these per charge type, latency per charge,
   cost (the number of model calls; 0 while `LLM_ENABLED=false`), and a table of
   case -> A -> B -> gold -> agent -> agree/disagree -> notes.
+
+Exit codes: 0 done; 2 refused; 3 disagreements unresolved (agreement written, no agent
+metrics); 4 report written, but the agent made at least one false claim (the PRD's hard
+gate of 0 false claims); 5 a charge got no decision.
 
 Definitions: a *correct claim* is agent CLAIM where gold is CLAIM. A *false claim* is agent
 CLAIM where gold is not CLAIM. A *missed claim* is gold CLAIM where the agent did not say

@@ -796,6 +796,7 @@ def test_unresolved_unit_never_shows_evidence_present_pass():
     assert window.verdict == Verdict.UNCERTAIN
     assert (window.detail or "").startswith("unit not resolved")
     assert _verdicts(d)["unit_resolved"] == Verdict.FAIL
+    assert _verdicts(d)["evidence_contradicts_charge"] == Verdict.UNCERTAIN
     assert d.rule_id == "R_UNRESOLVED_UNIT" and d.decision == Decision.REVIEW
 
 

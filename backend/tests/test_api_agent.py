@@ -2,16 +2,19 @@
 the same JSON shape as `alibi run --json`. Runs on Postgres with row-level security."""
 
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 import sqlalchemy as sa
+import yaml
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine
 
 from app.api.agent import db_engine
 from app.api.auth import configured_keys, hash_key, org_for_key, parse_api_keys
 from app.core.config import REPO_ROOT, get_settings
+from app.core.rules import parse_engine_config
 from app.db import tables as t
 from app.db.session import org_session
 from app.main import app
@@ -67,9 +70,7 @@ def _post(
         body = (files / "upstream" / f"{pod}_api.csv").read_bytes()
         upload.append(("upstream", (name, body, "text/csv")))
     headers = {"X-API-Key": key} if key is not None else {}
-    return client.post(
-        "/agent", files=upload, data={"as_of": "2026-09-25", **(data or {})}, headers=headers
-    )
+    return client.post("/agent", files=upload, data=data or {}, headers=headers)
 
 
 def _rows(engine: Engine, org: str, table: sa.Table) -> int:
@@ -181,8 +182,27 @@ def test_upstream_files_must_be_one_per_pod_with_a_pod_prefix(client, files):
     assert resp.status_code == 422 and "one upstream file per pod" in resp.json()["detail"]
 
 
-def test_bad_as_of_is_422(client, files):
-    assert _post(client, files, ALPHA_KEY, data={"as_of": "27/09/2026"}).status_code == 422
+def test_the_caller_cannot_choose_the_decision_date(client, files):
+    resp = _post(client, files, ALPHA_KEY, data={"as_of": "2020-01-01"})
+    assert resp.status_code == 200
+    assert resp.headers["x-alibi-as-of"] == datetime.now(UTC).date().isoformat()
+
+
+def test_bad_engine_config_is_refused_before_anything_is_written(
+    client, files, app_engine, monkeypatch
+):
+    data = yaml.safe_load((REPO_ROOT / "config" / "engine.yaml").read_text())
+    data["charge_types"]["refund_issued_item_not_returned"]["pods"]["returns"]["max_days_after"] = (
+        60
+    )
+    monkeypatch.setattr("app.api.agent.load_engine_config", lambda: parse_engine_config(data))
+    before = {org: _rows(app_engine, org, t.charges) for org in (ALPHA, BRAVO)}
+    audit_before = _rows(app_engine, ALPHA, t.audit_events)
+    resp = _post(client, files, ALPHA_KEY)
+    assert resp.status_code == 500
+    assert "engine configuration refused" in resp.json()["detail"]
+    assert {org: _rows(app_engine, org, t.charges) for org in (ALPHA, BRAVO)} == before
+    assert _rows(app_engine, ALPHA, t.audit_events) == audit_before
 
 
 # --- key configuration ----------------------------------------------------------------
@@ -231,3 +251,23 @@ def test_cli_api_key_prints_a_key_and_its_hash_entry():
     assert entry == f"{ALPHA}:{hash_key(key)}"
     assert parse_api_keys(entry) == {hash_key(key): ALPHA}
     assert len(key) >= 40
+
+
+def test_another_orgs_malformed_row_is_not_stored_under_the_callers_org(client, files, app_engine):
+    report = (files / "report.csv").read_text()
+    tail = "SKU,FN,FBA,,inbound_defect_fee,notanumber,1.00,2026-07-01\n"  # bad quantity
+    bad = f"FEE-BAD-1,fee_report,UNIT-X,{BRAVO},{tail}"
+    own_bad = f"FEE-BAD-2,fee_report,UNIT-Y,{ALPHA},{tail}"
+    (files / "report_bad.csv").write_text(report + bad + own_bad)
+    upload = [("report", ("report.csv", (files / "report_bad.csv").read_bytes(), "text/csv"))]
+    for pod in PODS:
+        body = (files / "upstream" / f"{pod}_api.csv").read_bytes()
+        upload.append(("upstream", (f"{pod}_api.csv", body, "text/csv")))
+    resp = client.post("/agent", files=upload, headers={"X-API-Key": ALPHA_KEY})
+    assert resp.status_code == 200
+    assert resp.headers["x-alibi-rows-quarantined"] == "1"  # alpha's own bad row only
+    with org_session(app_engine, ALPHA) as s:
+        raws: list[dict[str, str]] = list(s.execute(sa.select(t.quarantined_rows.c.raw)).scalars())
+    assert any(r.get("line_id") == "FEE-BAD-2" for r in raws)
+    assert not any(r.get("org_id") == BRAVO for r in raws)
+    assert _rows(app_engine, BRAVO, t.quarantined_rows) == 0

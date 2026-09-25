@@ -6,21 +6,26 @@ name another one: the endpoint declares no organisation field, and ingestion loa
 key's organisation's rows (rows for any other organisation are skipped and counted in the
 X-Alibi-Rows-Skipped-Other-Org header). Every read and write runs in a session scoped to
 that organisation, so row-level security applies.
+
+Decisions are judged as of today (UTC). The caller cannot choose the date: a past date would
+reopen an expired filing window, a future one would close an open one. Replays at a chosen
+date are a CLI operation (`alibi run --as-of`).
 """
 
 import re
 import tempfile
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import JSONResponse
 from sqlalchemy import Engine
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.api.auth import require_org
 from app.core.config import get_settings
+from app.core.rules import check_windows_consistent, load_engine_config, load_rules
 from app.db.session import get_engine
 from app.ingest.loader import PODS, ingest_org
 from app.pipeline import run_org
@@ -64,13 +69,15 @@ def post_agent(
     upstream: Annotated[
         list[UploadFile], File(description="one CSV per pod: receiving_, prep_, pack_, returns_")
     ],
-    as_of: Annotated[str | None, Form(description="YYYY-MM-DD; default today (UTC)")] = None,
 ) -> JSONResponse:
+    when = datetime.now(UTC).date()
+    # Refuse a bad engine config before anything is written, so no charge is ever stored
+    # without a decision (rule 5).
     try:
-        when = date.fromisoformat(as_of) if as_of else datetime.now(UTC).date()
-    except ValueError:
+        check_windows_consistent(load_rules(), load_engine_config())
+    except ValueError as exc:
         raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_CONTENT, "as_of must be YYYY-MM-DD"
+            status.HTTP_500_INTERNAL_SERVER_ERROR, f"engine configuration refused: {exc}"
         ) from None
     names = [_upstream_name(u) for u in upstream]
     pods = [n.split("_", 1)[0] for n in names]
@@ -106,6 +113,7 @@ def post_agent(
         headers={
             "X-Alibi-Run-Id": result.run_id,
             "X-Alibi-Organization": org,
+            "X-Alibi-As-Of": when.isoformat(),
             "X-Alibi-Rows-Skipped-Other-Org": str(summary.skipped_other_org),
             "X-Alibi-Rows-Quarantined": str(summary.quarantined),
         },

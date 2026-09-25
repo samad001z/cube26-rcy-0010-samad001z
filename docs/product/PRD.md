@@ -7,7 +7,7 @@
 | Product | Alibi, the Recovery Manager for ecommerce operations |
 | Track | CodeQuesters, Recovery Manager (#5 RCY) |
 | Owner | Syed Saad Ur Rahman |
-| Status | v1 scope for the Round 2 build, revised 2026-09-27 to match what is built (see ARCHITECTURE.md) |
+| Status | v1 scope for the Round 2 build, revised 2026-09-25 to match what is built (see ARCHITECTURE.md) |
 
 ## 1. Problem
 

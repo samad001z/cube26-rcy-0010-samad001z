@@ -46,8 +46,9 @@ charge_types:
     pods:
       # A return can arrive as late as the filing window allows (sourced: 60-120 days after
       # the refund), so the window after posting runs to the filing window's close (D-019).
-      # A late but genuine return is then never read as "no return". The loader refuses a
-      # max_days_after shorter than the sourced close day (check_windows_consistent).
+      # A late but genuine return is then never read as "no return". Every run (and every
+      # POST /agent, before anything is written) refuses a max_days_after shorter than the
+      # sourced close day (check_windows_consistent in app/core/rules.py).
       returns: {window: around_posting, max_days_before: 60, max_days_after: 120,
                 match_keys: [order_id]}
 

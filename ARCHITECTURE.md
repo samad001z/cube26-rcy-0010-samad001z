@@ -20,7 +20,7 @@ alibi run --report ... --upstream ... --org ...
 If deciding one charge raises, that charge is still persisted as REVIEW with status `pending` (rule `R_ENGINE_ERROR`; `reason_code` `DEPENDENCY_UNAVAILABLE` if the database or another dependency failed, `ENGINE_ERROR` otherwise), inside a savepoint so the rest of the run continues. A pre-check failure fails open every charge of the run.
 
 Configuration:
-- `config/rules/amazon_us.yaml`: channel rules only. A value needs a source URL, a retrieval date, `retrieved_by: human` and a verbatim excerpt, or the loader refuses it. Unsourced values are null.
+- `config/rules/amazon_us.yaml`: channel rules only. A value needs a source URL, a retrieval date, `retrieved_by: human` and a verbatim excerpt, or the loader refuses it. Unsourced values are null. Filing windows have an open and a close day counted from the line's posted date, used as a proxy for the event date the source counts from (D-017).
 - `config/engine.yaml`: this project's engineering choices (charge kinds, relevance, custody windows, defect category coverage, duplicate window, confidence table). See docs/DECISIONS.md D-011, D-013, D-014, D-015.
 
 ## Checks on every decision
@@ -30,7 +30,7 @@ Configuration:
 | `unit_resolved` | a record carries the unit and sku/fnsku agree | no record, or a key conflicts | - |
 | `not_duplicate` | no earlier line with the same fingerprint | duplicate of an earlier line | - |
 | `not_already_reimbursed` | no, or partial, matching reimbursement | fully reimbursed, or the line is itself a reimbursement | a refund could belong to more than one fee |
-| `within_filing_window` | sourced deadline not passed | sourced deadline passed | no sourced window ("filing deadline not verified") |
+| `within_filing_window` | inside the sourced window | window not open yet ("not yet eligible"), or sourced deadline passed | no sourced deadline ("filing deadline not verified") |
 | `evidence_present` | a usable record speaks to the charge | nothing speaks to it | - |
 | `evidence_in_custody_window` | an in-scope record is inside the window | in-scope records exist, none inside | no in-scope record |
 | `evidence_contradicts_charge` | CONTRADICTED | SUPPORTED | INSUFFICIENT or CONFLICTING |
@@ -42,28 +42,30 @@ Configuration:
 
 | # | rule_id | decision | key check |
 |---|---|---|---|
-| 1 | R_FEE_REFUND_LINE | DO_NOT_CLAIM | not_already_reimbursed |
-| 2 | R_ZERO_FEE | DO_NOT_CLAIM | amount_computable |
-| 3 | R_REIMBURSEMENT_AMBIGUOUS | REVIEW | not_already_reimbursed |
-| 4 | R_DUPLICATE | CLAIM (DO_NOT_CLAIM, `FILING_WINDOW_EXPIRED`, if the sourced deadline passed) | not_duplicate |
-| 5 | R_ALREADY_REIMBURSED | DO_NOT_CLAIM | not_already_reimbursed |
-| 6 | R_UNRESOLVED_UNIT | REVIEW | unit_resolved |
-| 7 | R_EVIDENCE_OUTSIDE_WINDOW | REVIEW | evidence_in_custody_window |
-| 8 | R_NO_RELEVANT_EVIDENCE | REVIEW | evidence_present |
+| 1 | R_FILING_WINDOW_NOT_OPEN | REVIEW (`FILING_WINDOW_NOT_OPEN`); never CLAIM or DO_NOT_CLAIM | within_filing_window |
+| 2 | R_FEE_REFUND_LINE | DO_NOT_CLAIM | not_already_reimbursed |
+| 3 | R_ZERO_FEE | DO_NOT_CLAIM | amount_computable |
+| 4 | R_REIMBURSEMENT_AMBIGUOUS | REVIEW | not_already_reimbursed |
+| 5 | R_DUPLICATE | CLAIM (DO_NOT_CLAIM, `FILING_WINDOW_EXPIRED`, if the sourced deadline passed) | not_duplicate |
+| 6 | R_ALREADY_REIMBURSED | DO_NOT_CLAIM | not_already_reimbursed |
+| 7 | R_UNRESOLVED_UNIT | REVIEW | unit_resolved |
+| 8 | R_EVIDENCE_OUTSIDE_WINDOW | REVIEW | evidence_in_custody_window |
+| 9 | R_NO_RELEVANT_EVIDENCE | REVIEW | evidence_present |
 | | *Loss events only, never CLAIM* | | |
-| 9 | R_FILING_WINDOW_PASSED | DO_NOT_CLAIM (`FILING_WINDOW_EXPIRED`) | within_filing_window |
-| 10 | R_CONFLICTING | REVIEW | evidence_contradicts_charge |
-| 11 | R_INSUFFICIENT | REVIEW | evidence_contradicts_charge |
-| 12 | row of `loss_event_outcomes` (below) | REVIEW or DO_NOT_CLAIM | see below |
+| 10 | R_FILING_WINDOW_PASSED | DO_NOT_CLAIM (`FILING_WINDOW_EXPIRED`) | within_filing_window |
+| 11 | R_CONFLICTING | REVIEW | evidence_contradicts_charge |
+| 12 | R_INSUFFICIENT | REVIEW | evidence_contradicts_charge |
+| 13 | row of `loss_event_outcomes` (below) | REVIEW or DO_NOT_CLAIM | see below |
 | | *Fees only* | | |
-| 13 | R_CONFLICTING | REVIEW | evidence_contradicts_charge |
-| 14 | R_SUPPORTED | DO_NOT_CLAIM | evidence_contradicts_charge |
-| 15 | R_INSUFFICIENT | REVIEW | evidence_contradicts_charge |
-| 16 | R_AMOUNT_NOT_COMPUTABLE | REVIEW | amount_computable |
-| 17 | R_PARTIAL_COVERAGE | REVIEW | evidence_contradicts_charge |
-| 18 | R_DEFECT_CATEGORY_MISSING | REVIEW | evidence_contradicts_charge |
-| 19 | R_FILING_WINDOW_PASSED | DO_NOT_CLAIM (`FILING_WINDOW_EXPIRED`) | within_filing_window |
-| 20 | R_CONTRADICTED_FULL | CLAIM | evidence_contradicts_charge |
+| 14 | R_CONFLICTING | REVIEW | evidence_contradicts_charge |
+| 15 | R_SUPPORTED | DO_NOT_CLAIM | evidence_contradicts_charge |
+| 16 | R_INSUFFICIENT | REVIEW | evidence_contradicts_charge |
+| 17 | R_AMOUNT_NOT_COMPUTABLE | REVIEW | amount_computable |
+| 18 | R_PARTIAL_COVERAGE | REVIEW | evidence_contradicts_charge |
+| 19 | R_DEFECT_CATEGORY_MISSING | REVIEW | evidence_contradicts_charge |
+| 20 | R_FILING_WINDOW_PASSED | DO_NOT_CLAIM (`FILING_WINDOW_EXPIRED`) | within_filing_window |
+| 21 | R_CONTRADICTED_FULL | CLAIM | evidence_contradicts_charge |
+
 
 Loss-event rows (`config/engine.yaml` `loss_event_outcomes`, D-016):
 

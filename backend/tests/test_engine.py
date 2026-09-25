@@ -45,9 +45,28 @@ def run(
     return decide(c, pre, res, retrieve(c, res, CFG), rules, CFG, run_id=RUN, decided_at=NOW)
 
 
-def rules_with_window(days: int, ct: str = "inbound_defect_fee") -> ChannelRules:
+def _unsourced() -> ChannelRules:
+    """The shipped rules with every filing window set back to null."""
     data = _rules()
-    data["filing_window_days"][ct] = {**SOURCED, "value": days}
+    for ct in data["filing_windows"]:
+        data["filing_windows"][ct] = {
+            k: None for k in data["filing_windows"][ct] if k != "secondary_sources"
+        } | {"secondary_sources": []}
+    return parse_rules(data)
+
+
+RULES_UNSOURCED = _unsourced()
+
+
+def rules_with_window(
+    days: int, ct: str = "inbound_defect_fee", open_days: int | None = None
+) -> ChannelRules:
+    data = _rules()
+    data["filing_windows"][ct] = {
+        **SOURCED,
+        "window_open_days": open_days,
+        "window_close_days": days,
+    }
     return parse_rules(data)
 
 
@@ -294,7 +313,8 @@ def test_loss_events_are_never_claim_even_with_supporting_evidence():
         (ChargeType.DAMAGED_IN_WAREHOUSE, [prep_all_pass()]),
     ):
         for amount in ("0.00", "14.00"):
-            d = run(charge(charge_type=ct, amount=amount), records)
+            # No filing window: the evidence mapping alone (expiry is tested separately).
+            d = run(charge(charge_type=ct, amount=amount), records, rules=RULES_UNSOURCED)
             assert d.decision == Decision.REVIEW, (ct, amount)
             assert d.rule_id == "R_AMOUNT_NOT_COMPUTABLE"
             assert d.evidence_status == EvidenceStatus.SUPPORTED
@@ -454,7 +474,8 @@ def test_lost_inbound_pending_later_return_is_insufficient_not_supported():
 
 def test_damaged_prep_with_failed_check_is_insufficient():
     prep = record("PRP-1", checks=[check("fnsku_label_placement", "FAIL")])
-    d = run(charge(charge_type=ChargeType.DAMAGED_IN_WAREHOUSE, amount="14.00"), [prep])
+    c = charge(charge_type=ChargeType.DAMAGED_IN_WAREHOUSE, amount="14.00")
+    d = run(c, [prep], rules=RULES_UNSOURCED)
     assert d.decision == Decision.REVIEW and d.rule_id == "R_INSUFFICIENT"
 
 
@@ -615,3 +636,55 @@ def test_overridden_prep_record_cannot_contradict():
     d = run(charge(defect_category="label"), [r])
     assert d.decision == Decision.REVIEW and d.evidence_status == EvidenceStatus.INSUFFICIENT
     assert "record status overridden" in d.reason
+
+
+# --- filing window with an open day (D-017) ---------------------------------------------
+
+REFUND_WINDOW = rules_with_window(120, "refund_issued_item_not_returned", open_days=60)
+# _refund_line() is posted 2026-06-24: the window opens 2026-08-23 and closes 2026-10-22.
+
+
+def test_before_window_opens_a_would_be_do_not_claim_is_review_not_open():
+    d = run(_refund_line(), [_returns()], rules=REFUND_WINDOW, as_of=date(2026, 8, 22))
+    assert d.decision == Decision.REVIEW and d.rule_id == "R_FILING_WINDOW_NOT_OPEN"
+    assert d.reason_code == ReasonCode.FILING_WINDOW_NOT_OPEN
+    c = d.check("within_filing_window")
+    assert c.verdict == Verdict.FAIL and "not yet eligible" in (c.detail or "")
+    assert d.next_action is not None and "2026-08-23" in d.next_action
+    assert d.evidence_status == EvidenceStatus.CONTRADICTED  # evidence still assessed
+
+
+def test_before_window_opens_a_would_be_claim_is_review_not_open():
+    rules = rules_with_window(120, open_days=60)  # charge() posted 07-18: opens 09-16
+    d = run(
+        charge(defect_category="label"),
+        [prep_all_pass()],
+        rules=rules,
+        as_of=date(2026, 9, 15),
+    )
+    assert d.decision == Decision.REVIEW and d.rule_id == "R_FILING_WINDOW_NOT_OPEN"
+    assert d.claim is None
+
+
+def test_inside_window_the_evidence_decides():
+    d = run(_refund_line(), [_returns()], rules=REFUND_WINDOW, as_of=date(2026, 8, 23))
+    assert d.decision == Decision.DO_NOT_CLAIM and d.rule_id == "R_ITEM_RETURNED"
+    assert d.check("within_filing_window").verdict == Verdict.PASS
+    assert d.warnings == []
+    d = run(_refund_line(), [_returns(parts="FAIL")], rules=REFUND_WINDOW, as_of=AS_OF)
+    assert d.rule_id == "R_RETURNED_INCOMPLETE_OR_DAMAGED"
+
+
+def test_after_window_closes_is_do_not_claim_expired():
+    d = run(_refund_line(), [_returns(parts="FAIL")], rules=REFUND_WINDOW, as_of=date(2026, 10, 23))
+    assert d.decision == Decision.DO_NOT_CLAIM and d.rule_id == "R_FILING_WINDOW_PASSED"
+    assert d.reason_code == ReasonCode.FILING_WINDOW_EXPIRED
+    assert "proxy for the event date" in d.reason
+    assert d.check("within_filing_window").verdict == Verdict.FAIL
+
+
+def test_unknown_window_on_a_loss_event_keeps_the_warning_and_evidence_decides():
+    d = run(_refund_line(), [_returns(parts="FAIL")], rules=RULES_UNSOURCED)
+    assert d.rule_id == "R_RETURNED_INCOMPLETE_OR_DAMAGED"
+    assert d.check("within_filing_window").verdict == Verdict.UNCERTAIN
+    assert d.warnings == ["filing deadline not verified"]

@@ -132,15 +132,19 @@ def test_run_prechecks_sums_reimbursed_amount_as_decimal():
 # --- filing window --------------------------------------------------------------------
 
 
-def _rules_with_window(days: int):
+def _rules_with_window(days: int | None, open_days: int | None = None):
     data = _rules()
-    data["filing_window_days"]["inbound_defect_fee"] = {**SOURCED, "value": days}
+    data["filing_windows"]["inbound_defect_fee"] = {
+        **SOURCED,
+        "window_open_days": open_days,
+        "window_close_days": days,
+    }
     return parse_rules(data)
 
 
 def test_unknown_window_is_uncertain_with_the_warning_text():
     fw = filing_window(charge(), RULES, date(2026, 9, 25))
-    assert fw.verdict == Verdict.UNCERTAIN
+    assert fw.verdict == Verdict.UNCERTAIN and fw.state == "unknown"
     assert fw.deadline is None
     assert "filing deadline not verified" in fw.detail
 
@@ -150,6 +154,31 @@ def test_known_window_open_and_passed():
     c = charge(posted=date(2026, 7, 18))
     open_ = filing_window(c, rules, date(2026, 8, 17))
     assert open_.verdict == Verdict.PASS and open_.deadline == date(2026, 8, 17)
+    assert open_.state == "open"
     passed = filing_window(c, rules, date(2026, 8, 18))
-    assert passed.verdict == Verdict.FAIL
+    assert passed.verdict == Verdict.FAIL and passed.state == "passed"
     assert "https://example.org/help/page" in passed.detail
+
+
+def test_window_with_open_day_before_inside_and_after():
+    # 60-120 days after posting, as the refund window: opens 09-16, closes 11-15.
+    rules = _rules_with_window(120, open_days=60)
+    c = charge(posted=date(2026, 7, 18))
+    before = filing_window(c, rules, date(2026, 9, 15))
+    assert before.state == "not_open" and before.verdict == Verdict.FAIL
+    assert before.opens == date(2026, 9, 16) and "not yet eligible" in before.detail
+    first_day = filing_window(c, rules, date(2026, 9, 16))
+    assert first_day.state == "open" and first_day.verdict == Verdict.PASS
+    last_day = filing_window(c, rules, date(2026, 11, 15))
+    assert last_day.state == "open" and last_day.deadline == date(2026, 11, 15)
+    after = filing_window(c, rules, date(2026, 11, 16))
+    assert after.state == "passed" and after.verdict == Verdict.FAIL
+
+
+def test_open_day_known_but_close_unknown_is_uncertain_once_open():
+    rules = _rules_with_window(None, open_days=60)
+    c = charge(posted=date(2026, 7, 18))
+    assert filing_window(c, rules, date(2026, 9, 15)).state == "not_open"
+    fw = filing_window(c, rules, date(2026, 9, 16))
+    assert fw.state == "unknown" and fw.verdict == Verdict.UNCERTAIN
+    assert "filing deadline not verified" in fw.detail

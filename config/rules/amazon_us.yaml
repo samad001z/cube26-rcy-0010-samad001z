@@ -5,7 +5,10 @@
 #   retrieved_on   date the page was read (YYYY-MM-DD)
 #   retrieved_by   "human" (values are pasted by a person from the live page)
 #   excerpt        the verbatim text the value was read from
-# The loader (backend/app/core/rules.py) refuses a value without all four.
+# The loader (backend/app/core/rules.py) refuses a value without all four. For filing windows
+# the values are window_open_days and window_close_days. Optional: source_type, anchor (the
+# event the source counts from), assumption (how this project applies it, e.g. a proxy date)
+# and caveat (why the source may be out of date).
 #
 # A value nobody has retrieved stays null. The engine treats null as "not verified": the
 # check that needs it returns UNCERTAIN, never a guess. Values are never taken from model
@@ -15,42 +18,94 @@
 # loader never reads a value from them.
 channel: amazon_us
 
-filing_window_days:
+# Filing windows per charge type. A claim may be filed from window_open_days after the anchor
+# date (null: from the anchor date) up to window_close_days after it. Before the window opens
+# the engine returns REVIEW with FILING_WINDOW_NOT_OPEN; after it closes, DO_NOT_CLAIM with
+# FILING_WINDOW_EXPIRED; with no sourced value, "filing deadline not verified" (D-014, D-017).
+filing_windows:
+  # Not covered by the 2024 reimbursement announcement below; still to be sourced.
   inbound_defect_fee:
-    value: null
+    window_open_days: null
+    window_close_days: null
+    anchor: null
     source_url: null
     retrieved_on: null
     retrieved_by: null
     excerpt: null
     secondary_sources: []
+  # Not covered by the 2024 reimbursement announcement below; still to be sourced.
   fulfilment_fee_weight_tier:
-    value: null
+    window_open_days: null
+    window_close_days: null
+    anchor: null
     source_url: null
     retrieved_on: null
     retrieved_by: null
     excerpt: null
     secondary_sources: []
+  # Not covered by the 2024 reimbursement announcement below: it covers items lost in the
+  # fulfilment center and removals, not inbound shipments. Still to be sourced.
   lost_inbound:
-    value: null
+    window_open_days: null
+    window_close_days: null
+    anchor: null
     source_url: null
     retrieved_on: null
     retrieved_by: null
     excerpt: null
     secondary_sources: []
   damaged_in_warehouse:
-    value: null
-    source_url: null
-    retrieved_on: null
-    retrieved_by: null
-    excerpt: null
+    window_open_days: null
+    window_close_days: 60
+    anchor: date the item was reported lost or damaged
+    source_url: https://sellercentral.amazon.com/seller-forums/discussions/t/81c3235d-4c44-47ba-96c5-883cecab3244
+    source_type: official_announcement
+    retrieved_on: 2026-09-25
+    retrieved_by: human
+    excerpt: "A fulfillment center operations claim for an item that is lost or damaged in the fulfillment center must be submitted no later than 60 days after the item was reported lost or damaged."
+    assumption: "The report line's posted_date is used as a proxy for the date the item was reported lost or damaged; no upstream record carries that date."
+    caveat: "Official announcement posted by News_Amazon under News and Announcements (2024). It says the FBA inventory reimbursement policy page would be updated, so it may be superseded by that page."
     secondary_sources: []
   refund_issued_item_not_returned:
-    value: null
-    source_url: null
-    retrieved_on: null
-    retrieved_by: null
-    excerpt: null
+    window_open_days: 60
+    window_close_days: 120
+    anchor: customer refund or replacement date
+    source_url: https://sellercentral.amazon.com/seller-forums/discussions/t/81c3235d-4c44-47ba-96c5-883cecab3244
+    source_type: official_announcement
+    retrieved_on: 2026-09-25
+    retrieved_by: human
+    excerpt: "An FBA customer returns claim can be submitted between 60-120 days after the customer refund or replacement date. Claims must not be submitted before 60 days to ensure the customer has time to return the item to us for processing."
+    assumption: "The report line's posted_date is used as a proxy for the customer refund or replacement date."
+    caveat: "Official announcement posted by News_Amazon under News and Announcements (2024). It says the FBA inventory reimbursement policy page would be updated, so it may be superseded by that page."
     secondary_sources: []
+
+# Sourced rules for claim types no sample charge type maps to yet. Stored with their source;
+# the engine never reads them (applies_to: null).
+unmapped_rules:
+  - id: removal_lost_in_transit
+    claim_type: removal claim for items lost in transit
+    applies_to: null
+    window_open_days: 15
+    window_close_days: 75
+    anchor: shipment-creation date
+    source_url: https://sellercentral.amazon.com/seller-forums/discussions/t/81c3235d-4c44-47ba-96c5-883cecab3244
+    source_type: official_announcement
+    retrieved_on: 2026-09-25
+    retrieved_by: human
+    excerpt: "A removal claim for items lost in transit can be submitted 15-75 days from the shipment-creation date. Claims must not be submitted before 15 days to ensure the shipment can be delivered back to you."
+    caveat: "Official announcement posted by News_Amazon under News and Announcements (2024). It says the FBA inventory reimbursement policy page would be updated, so it may be superseded by that page."
+  - id: removal_other
+    claim_type: all other removal claims
+    applies_to: null
+    window_open_days: null
+    window_close_days: 60
+    anchor: date the shipment was delivered back to the seller
+    source_url: https://sellercentral.amazon.com/seller-forums/discussions/t/81c3235d-4c44-47ba-96c5-883cecab3244
+    source_type: official_announcement
+    retrieved_on: 2026-09-25
+    retrieved_by: human
+    excerpt: "All other removal claims must be filed within 60 days of the shipment being delivered back to you."
+    caveat: "Official announcement posted by News_Amazon under News and Announcements (2024). It says the FBA inventory reimbursement policy page would be updated, so it may be superseded by that page."
 
 # Fulfilment fee by size/weight tier. Needed to compute an overcharge on a weight-tier fee.
 fulfilment_fee_schedule:

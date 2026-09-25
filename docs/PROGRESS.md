@@ -21,7 +21,8 @@ Update at the end of every session. Newest entry on top.
   - No request-size limit in front of the app; the multipart body is parsed before the key check (D-020). That is deploy work.
   - The dates of the Round 2 plan are ahead of the calendar: all Day 1-3 work was done on 2026-09-25. The eval's fixed as-of date is 2026-09-27.
 - Environment: this cloud session has no Docker. Postgres 16 runs from the container install, and `alibi_eval` was created by hand (`docker/postgres/init.sh` now creates it).
-- Next step: human review of the sheet and the labelling. Then Day 4: review UI, overrides, fail-open tests.
+- Follow-up (same day, after the human lead reviewed the sheet): appended section 9 "Reading the sheet" to `eval/LABELLING_GUIDE.md` (nothing above it changed). The harness now reads only case_id, label and reason from the label files, so a Google Sheets or Excel CSV export works (BOM, CRLF, quoting, column order ignored); the sheet itself is still checked against the data. As-of 2026-09-27 comes from `eval/common.py:21` and is used at `eval/run_eval.py:204`; a test pins the sheet's and the harness's date together. `make lint test` green: 257 backend and 46 eval tests passed.
+- Next step: two humans label independently, commit, `make eval`. Then Day 4: review UI, overrides, fail-open tests.
 
 ### 2026-09-25 - Day 2 fixes, branch `day2-fixes`
 - Done:

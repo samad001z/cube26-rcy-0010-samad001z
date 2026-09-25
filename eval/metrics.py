@@ -15,27 +15,48 @@ class LabelError(ValueError):
     """A label file is missing a case, has an unknown case or has an invalid label."""
 
 
+def read_label_rows(path: Path) -> list[tuple[int, str, str, str]]:
+    """(row number, case_id, label, reason) from a label file as a spreadsheet exports it.
+    Only these three columns are read; every other column (the charge line, the evidence
+    summary) is ignored, so re-quoting, re-wrapping or trimming by Google Sheets or Excel
+    cannot matter. Tolerates a UTF-8 byte-order mark, CRLF line endings, any quoting,
+    header case and spacing, reordered or extra columns, and fully blank rows."""
+    with path.open(newline="", encoding="utf-8-sig") as fh:
+        reader = csv.reader(fh)
+        header = [h.strip().lower() for h in next(reader, [])]
+        if "case_id" not in header or "label" not in header:
+            raise LabelError(f"{path.name}: needs columns case_id and label")
+        wanted = ("case_id", "label", "reason")
+        idx = {name: header.index(name) for name in wanted if name in header}
+
+        def cell(row: list[str], name: str) -> str:
+            i = idx.get(name)
+            return row[i].strip() if i is not None and i < len(row) else ""
+
+        out = []
+        for n, row in enumerate(reader, start=2):
+            if not any(c.strip() for c in row):
+                continue
+            out.append((n, cell(row, "case_id"), cell(row, "label"), cell(row, "reason")))
+    return out
+
+
 def read_labels(path: Path, case_ids: Sequence[str]) -> dict[str, str]:
     """case_id -> label for every case in `case_ids`. Refuses blanks, unknown labels,
     unknown or repeated case ids, and missing cases."""
     labels: dict[str, str] = {}
-    with path.open(newline="", encoding="utf-8") as fh:
-        reader = csv.DictReader(fh)
-        if reader.fieldnames is None or not {"case_id", "label"} <= set(reader.fieldnames):
-            raise LabelError(f"{path.name}: needs columns case_id and label")
-        for n, row in enumerate(reader, start=2):
-            cid = (row.get("case_id") or "").strip()
-            label = (row.get("label") or "").strip().upper().replace(" ", "_")
-            if cid in labels:
-                raise LabelError(f"{path.name}:{n}: case {cid} appears twice")
-            if cid not in case_ids:
-                raise LabelError(f"{path.name}:{n}: unknown case {cid!r}")
-            if label not in LABELS:
-                raise LabelError(
-                    f"{path.name}:{n}: case {cid} has label {row.get('label')!r}; "
-                    f"expected one of {', '.join(LABELS)}"
-                )
-            labels[cid] = label
+    for n, cid, raw, _reason in read_label_rows(path):
+        label = raw.upper().replace(" ", "_")
+        if cid in labels:
+            raise LabelError(f"{path.name}:{n}: case {cid} appears twice")
+        if cid not in case_ids:
+            raise LabelError(f"{path.name}:{n}: unknown case {cid!r}")
+        if label not in LABELS:
+            raise LabelError(
+                f"{path.name}:{n}: case {cid} has label {raw!r}; "
+                f"expected one of {', '.join(LABELS)}"
+            )
+        labels[cid] = label
     missing = [c for c in case_ids if c not in labels]
     if missing:
         raise LabelError(f"{path.name}: no label for {len(missing)} case(s): {', '.join(missing)}")
@@ -48,8 +69,10 @@ def read_resolutions(path: Path, disputed: Sequence[str]) -> dict[str, tuple[str
     if not path.exists():
         return {}
     out: dict[str, tuple[str, str]] = {}
-    with path.open(newline="", encoding="utf-8") as fh:
+    with path.open(newline="", encoding="utf-8-sig") as fh:  # may come from a spreadsheet
         reader = csv.DictReader(fh)
+        if reader.fieldnames is not None:
+            reader.fieldnames = [h.strip().lower() for h in reader.fieldnames]
         if reader.fieldnames is None or not {"case_id", "gold_label"} <= set(reader.fieldnames):
             raise LabelError(f"{path.name}: needs columns case_id, gold_label, note")
         for n, row in enumerate(reader, start=2):

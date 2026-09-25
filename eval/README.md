@@ -105,9 +105,16 @@ for the same unit are listed so a labeller can judge that for themselves.
 
 `run_eval.py` refuses to run unless `labels_A.csv` and `labels_B.csv` exist, are tracked by
 git and have no uncommitted changes, and every case has a label from the vocabulary. The
-eval data and `labelling_sheet.csv` must be committed too, and the sheet and both label
-files must still match, row for row, what `make_sheet.py` builds from the data now. So the
-agent can never be scored on inputs the labellers did not see. It then:
+eval data and `labelling_sheet.csv` must be committed too, and the sheet must still match,
+row for row, what `make_sheet.py` builds from the data now, so the agent can never be
+scored on inputs the labellers did not see.
+
+Labellers may fill their file in Google Sheets or Excel and export it as CSV. The harness
+reads only `case_id`, `label` and `reason` from it. The case_ids must be exactly the
+sheet's, and each label must be CLAIM, DO_NOT_CLAIM or REVIEW (case and spaces ignored, so
+"do not claim" is fine). Every other column is ignored, and so are the byte-order mark,
+CRLF line endings, quoting, column order, extra columns and blank rows a spreadsheet may
+add. It then:
 
 - computes raw agreement and Cohen's kappa between A and B, before any resolution;
 - builds gold labels: the shared label where A and B agree, otherwise the committed row in

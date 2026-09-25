@@ -3,8 +3,9 @@
     make eval        (cd backend && uv run python ../eval/run_eval.py)
 
 Refuses to run unless eval/labels_A.csv and eval/labels_B.csv exist, are committed to git
-with no uncommitted changes, and label every case; and unless the eval data and the sheet
-are committed and still produce exactly the charge lines and summaries the labellers saw.
+with no uncommitted changes, and label every case of the sheet (only case_id, label and
+reason are read from them, so a Google Sheets or Excel export is fine); and unless the eval
+data and the sheet are committed and the data still produces exactly that sheet.
 Then:
 
 1. raw agreement and Cohen's kappa between A and B, before any resolution;
@@ -61,6 +62,7 @@ from metrics import (
     agreement,
     build_gold,
     percentile,
+    read_label_rows,
     read_labels,
     read_resolutions,
     score,
@@ -108,24 +110,23 @@ def require_committed(paths: list[Path], repo: Path = REPO_ROOT) -> str:
     return head.stdout.strip()
 
 
-def require_labels_match_data(label_paths: list[Path], expected: list[dict[str, str]]) -> None:
-    """Refuse unless the committed sheet and every label file show exactly the cases, charge
-    lines and evidence summaries that the eval data produces now (make_sheet.build_rows).
-    Catches data or sheet edits made after labelling."""
+def require_sheet_matches_data(expected: list[dict[str, str]]) -> None:
+    """Refuse unless the committed labelling sheet shows exactly the cases, charge lines and
+    evidence summaries that the eval data produces now (make_sheet.build_rows). Catches data
+    or sheet edits made after labelling. The label files are not compared here: labellers
+    edit them in Google Sheets or Excel, so only their case_id, label and reason are read
+    (metrics.read_label_rows), and their case_ids must be exactly the sheet's."""
 
     def view(rows: list[dict[str, str]]) -> list[tuple[str, ...]]:
         return [tuple(r.get(c, "") for c in SHEET_COLUMNS) for r in rows]
 
-    want = view(expected)
-    for p in [SHEET_CSV, *label_paths]:
-        with p.open(newline="", encoding="utf-8") as fh:
-            got = view(list(csv.DictReader(fh)))
-        if got != want:
-            raise EvalRefused(
-                f"{p.name} does not match what eval/data produces now: the data or the sheet "
-                "changed after labelling (or a labeller edited a column other than label and "
-                "reason)"
-            )
+    with SHEET_CSV.open(newline="", encoding="utf-8") as fh:
+        got = view(list(csv.DictReader(fh)))
+    if got != view(expected):
+        raise EvalRefused(
+            f"{SHEET_CSV.name} does not match what eval/data produces now: the data or the "
+            "sheet changed after labelling"
+        )
 
 
 def false_claim_gate(false_claims: int) -> int:
@@ -139,8 +140,7 @@ def sheet_case_ids(path: Path = SHEET_CSV) -> list[str]:
 
 
 def reasons(path: Path) -> dict[str, str]:
-    with path.open(newline="", encoding="utf-8") as fh:
-        return {r["case_id"]: (r.get("reason") or "").strip() for r in csv.DictReader(fh)}
+    return {cid: reason for _n, cid, _label, reason in read_label_rows(path)}
 
 
 # --- the agent run --------------------------------------------------------------------
@@ -463,7 +463,7 @@ def charge_types_of(report: Path = REPORT_CSV) -> dict[str, str]:
 def main() -> int:
     try:
         commit = require_committed([LABELS_A, LABELS_B, SHEET_CSV, *DATA_FILES], REPO_ROOT)
-        require_labels_match_data([LABELS_A, LABELS_B], build_rows())
+        require_sheet_matches_data(build_rows())
         ids = sheet_case_ids(SHEET_CSV)
         a, b = read_labels(LABELS_A, ids), read_labels(LABELS_B, ids)
         ag = agreement(a, b)

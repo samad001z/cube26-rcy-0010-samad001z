@@ -200,14 +200,88 @@ def test_refuses_when_the_data_changed_after_labelling(repo, monkeypatch, capsys
     assert "does not match what eval/data produces now" in capsys.readouterr().err
 
 
-def test_refuses_when_a_labeller_edited_the_evidence_column(repo, capsys):
+def _stub_agent(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    """Stands in for run_agent so the test can see the guards let the run through."""
+    called: list[int] = []
+
+    def reached(*args: object, **kwargs: object) -> None:
+        called.append(1)
+        raise _Reached
+
+    monkeypatch.setattr(run_eval, "run_agent", reached)
+    monkeypatch.setenv("EVAL_DATABASE_URL", "postgresql+psycopg://x@localhost/alibi_eval")
+    monkeypatch.setenv("EVAL_MIGRATION_DATABASE_URL", "postgresql+psycopg://x@localhost/alibi_eval")
+    return called
+
+
+class _Reached(Exception):
+    pass
+
+
+def test_edits_to_columns_other_than_label_and_reason_are_ignored(repo, monkeypatch):
     _labels(repo, "labels_A.csv", ["CLAIM", "REVIEW", "REVIEW"])
     _labels(repo, "labels_B.csv", ["CLAIM", "REVIEW", "REVIEW"])
     text = (repo / "labels_B.csv").read_text().replace("2,x,y,", "2,x,y edited,", 1)
     (repo / "labels_B.csv").write_text(text)
     _git(repo, "commit", "-qam", "edit")
+    called = _stub_agent(monkeypatch)
+    with pytest.raises(_Reached):
+        run_eval.main()
+    assert called == [1]
+
+
+def test_a_spreadsheet_round_tripped_label_file_is_accepted(repo, monkeypatch):
+    """What Google Sheets or Excel exports: a byte-order mark, CRLF, every field quoted,
+    columns reordered, an extra column, the long text columns re-wrapped, labels in mixed
+    case, and trailing blank rows."""
+    _labels(repo, "labels_A.csv", ["CLAIM", "REVIEW", "DO_NOT_CLAIM"])
+    rows = [
+        ["Label ", "case_id", "Notes", "reason", "evidence_summary", "charge_line"],
+        ["claim", "1", "", "prep passed, defect named", "Prep record ...\nline two", "x"],
+        ["Review", "2", "hm", 'said "unclear", checked twice', "", ""],
+        ["do not claim", " 3 ", "", "item came back", "y, with a comma", "x"],
+        ["", "", "", "", "", ""],
+        [],
+    ]
+    with (repo / "labels_B.csv").open("w", newline="", encoding="utf-8-sig") as fh:
+        csv.writer(fh, quoting=csv.QUOTE_ALL, lineterminator="\r\n").writerows(rows)
+    raw = (repo / "labels_B.csv").read_bytes()
+    assert raw.startswith(b"\xef\xbb\xbf") and b"\r\n" in raw  # really BOM + CRLF
+    _git(repo, "add", "labels_B.csv")
+    _git(repo, "commit", "-qm", "export from a spreadsheet")
+
+    from metrics import read_labels
+
+    assert read_labels(repo / "labels_B.csv", ["1", "2", "3"]) == {
+        "1": "CLAIM",
+        "2": "REVIEW",
+        "3": "DO_NOT_CLAIM",
+    }
+    assert run_eval.reasons(repo / "labels_B.csv")["2"] == 'said "unclear", checked twice'
+    called = _stub_agent(monkeypatch)
+    with pytest.raises(_Reached):
+        run_eval.main()
+    assert called == [1]
+
+
+def test_a_label_file_must_cover_exactly_the_sheets_cases(repo, capsys):
+    _labels(repo, "labels_A.csv", ["CLAIM", "REVIEW", "REVIEW"])
+    _labels(repo, "labels_B.csv", ["CLAIM", "REVIEW"])  # case 3 missing
     assert run_eval.main() == run_eval.EXIT_REFUSED
-    assert "labels_B.csv does not match" in capsys.readouterr().err
+    assert "no label for 1 case(s): 3" in capsys.readouterr().err
+
+
+def test_the_harness_judges_at_the_same_date_the_sheet_states():
+    import common
+    import make_sheet
+
+    # Both scripts import the one constant from common.py (not a copy of its value).
+    assert vars(run_eval)["AS_OF"] is vars(make_sheet)["AS_OF"] is common.AS_OF
+    assert str(common.AS_OF) == "2026-09-27"
+    with common.SHEET_CSV.open(newline="", encoding="utf-8") as fh:
+        lines = [r["evidence_summary"].splitlines()[-1] for r in csv.DictReader(fh)]
+    dated = [ln for ln in lines if " on 2026-" in ln and ("inside" in ln or "NOT YET" in ln)]
+    assert dated and all("on 2026-09-27" in ln for ln in dated)
 
 
 def test_refuses_when_a_data_file_is_not_committed(repo, monkeypatch, capsys):

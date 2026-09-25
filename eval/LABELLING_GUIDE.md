@@ -125,3 +125,18 @@ Prep record: all checks PASS.
 - Disagreeing with the other labeller is **fine and expected**. Disagreements are recorded and discussed afterwards. They show which cases are genuinely hard.
 
 Thank you. Your careful answers are what make the evaluation honest.
+
+---
+
+## 9. Reading the sheet
+
+- **Treat 2026-09-27 as today** for every deadline. Each case's last line gives its deadline status as of that date.
+- **"the work order did not require X"**: that check was not needed for this product, so it was never checked. It is not a PASS or a FAIL.
+- **"recorded: ..."** after a PASS, FAIL or UNCERTAIN: the exact value the team wrote down.
+- **Operator decision** (Returns records): what the team did with the returned item.
+  - **restock**: put back into stock as sellable.
+  - **refurbish**: needs repair before it can be sold.
+  - **liquidate**: sold off cheaply.
+  - **dispose**: thrown away.
+- **PENDING**: the team has not finalised this record yet.
+- **"Other report line for this unit"**: another line on Amazon's report about the same unit.

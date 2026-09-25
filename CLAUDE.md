@@ -17,7 +17,7 @@ Deadline: **1 October 2026, 18:00 IST**. No resubmission. All code commits must 
 - Additional outcomes carried in `reason_code`: `DUPLICATE_CHARGE`, `ALREADY_REIMBURSED`, `UNRESOLVED_UNIT`, `NO_RELEVANT_EVIDENCE`, `EVIDENCE_OUTSIDE_WINDOW`, `FILING_WINDOW_EXPIRED`, `MODEL_UNAVAILABLE` (LLM failed), `DEPENDENCY_UNAVAILABLE` (database or other dependency failed), `ENGINE_ERROR` (the rule engine raised on a charge)
 - `status` of a decision record: `final` | `pending` (fail-open) | `overridden`
 
-Mapping: CONTRADICTED with full coverage -> CLAIM. SUPPORTED -> DO_NOT_CLAIM. INSUFFICIENT or CONFLICTING -> REVIEW. Duplicate charge -> CLAIM on the duplicate. Already fully reimbursed -> DO_NOT_CLAIM. Sourced filing deadline known and passed -> DO_NOT_CLAIM with `FILING_WINDOW_EXPIRED` (evidence checks still shown).
+Mapping (fee lines): CONTRADICTED with full coverage -> CLAIM. SUPPORTED -> DO_NOT_CLAIM. `evidence_status` is always relative to what the line asserts; loss events (lost, damaged, refunded and not returned) are never CLAIM and map per charge type in `config/engine.yaml` `loss_event_outcomes` (D-016). INSUFFICIENT or CONFLICTING -> REVIEW. Duplicate charge -> CLAIM on the duplicate. Already fully reimbursed -> DO_NOT_CLAIM. Sourced filing deadline known and passed -> DO_NOT_CLAIM with `FILING_WINDOW_EXPIRED` (evidence checks still shown).
 
 ## Non-negotiable rules
 

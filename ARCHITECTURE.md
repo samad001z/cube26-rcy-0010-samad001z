@@ -38,6 +38,8 @@ Configuration:
 
 ## Rules (first match wins)
 
+`evidence_status` is always relative to what the line asserts: CONTRADICTED means the evidence says the line is wrong (D-016). For a fee that favours recovery. For a loss event the line is what the seller would be reimbursed for, so SUPPORTED favours recovery and CONTRADICTED makes the loss doubtful.
+
 | # | rule_id | decision | key check |
 |---|---|---|---|
 | 1 | R_FEE_REFUND_LINE | DO_NOT_CLAIM | not_already_reimbursed |
@@ -48,15 +50,33 @@ Configuration:
 | 6 | R_UNRESOLVED_UNIT | REVIEW | unit_resolved |
 | 7 | R_EVIDENCE_OUTSIDE_WINDOW | REVIEW | evidence_in_custody_window |
 | 8 | R_NO_RELEVANT_EVIDENCE | REVIEW | evidence_present |
-| 9 | R_AMOUNT_NOT_COMPUTABLE (loss events) | REVIEW | amount_computable |
+| | *Loss events only, never CLAIM* | | |
+| 9 | R_FILING_WINDOW_PASSED | DO_NOT_CLAIM (`FILING_WINDOW_EXPIRED`) | within_filing_window |
 | 10 | R_CONFLICTING | REVIEW | evidence_contradicts_charge |
-| 11 | R_SUPPORTED | DO_NOT_CLAIM | evidence_contradicts_charge |
-| 12 | R_INSUFFICIENT | REVIEW | evidence_contradicts_charge |
-| 13 | R_AMOUNT_NOT_COMPUTABLE (fees) | REVIEW | amount_computable |
-| 14 | R_PARTIAL_COVERAGE | REVIEW | evidence_contradicts_charge |
-| 15 | R_DEFECT_CATEGORY_MISSING | REVIEW | evidence_contradicts_charge |
-| 16 | R_FILING_WINDOW_PASSED | DO_NOT_CLAIM (`FILING_WINDOW_EXPIRED`) | within_filing_window |
-| 17 | R_CONTRADICTED_FULL | CLAIM | evidence_contradicts_charge |
+| 11 | R_INSUFFICIENT | REVIEW | evidence_contradicts_charge |
+| 12 | row of `loss_event_outcomes` (below) | REVIEW or DO_NOT_CLAIM | see below |
+| | *Fees only* | | |
+| 13 | R_CONFLICTING | REVIEW | evidence_contradicts_charge |
+| 14 | R_SUPPORTED | DO_NOT_CLAIM | evidence_contradicts_charge |
+| 15 | R_INSUFFICIENT | REVIEW | evidence_contradicts_charge |
+| 16 | R_AMOUNT_NOT_COMPUTABLE | REVIEW | amount_computable |
+| 17 | R_PARTIAL_COVERAGE | REVIEW | evidence_contradicts_charge |
+| 18 | R_DEFECT_CATEGORY_MISSING | REVIEW | evidence_contradicts_charge |
+| 19 | R_FILING_WINDOW_PASSED | DO_NOT_CLAIM (`FILING_WINDOW_EXPIRED`) | within_filing_window |
+| 20 | R_CONTRADICTED_FULL | CLAIM | evidence_contradicts_charge |
+
+Loss-event rows (`config/engine.yaml` `loss_event_outcomes`, D-016):
+
+| charge type | outcome | evidence_status | decision | rule_id |
+|---|---|---|---|---|
+| refund, item not returned | ordered item back; identity, parts, condition all PASS | CONTRADICTED | DO_NOT_CLAIM | R_ITEM_RETURNED |
+| refund, item not returned | ordered item back; incomplete, damaged or condition uncertain | CONTRADICTED | REVIEW (possible separate claim) | R_RETURNED_INCOMPLETE_OR_DAMAGED |
+| refund, item not returned | a different item came back | SUPPORTED | REVIEW until an amount is computable | R_AMOUNT_NOT_COMPUTABLE |
+| lost inbound | prep on the shipment, no later record of the unit | SUPPORTED | REVIEW until an amount is computable | R_AMOUNT_NOT_COMPUTABLE |
+| lost inbound | the unit was seen after the loss | CONTRADICTED | REVIEW (loss doubtful) | R_LOSS_DOUBTFUL |
+| damaged in warehouse | prep with no failed check | SUPPORTED | REVIEW until an amount is computable | R_AMOUNT_NOT_COMPUTABLE |
+
+Only the "until an amount is computable" rows suggest an override with an amount. A refund line with no returns record in the custody window is rule 8 (INSUFFICIENT); its reason notes that the absence is consistent with the seller's claim but is not evidence.
 
 After the engine: `R_CITATION_INVALID` (validator) or `R_ENGINE_ERROR` (exception), both REVIEW with status `pending`.
 

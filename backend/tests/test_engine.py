@@ -287,7 +287,8 @@ def test_zero_fee_is_do_not_claim():
     assert d.claim is None
 
 
-def test_loss_events_are_never_claim_even_with_contradicting_evidence():
+def test_loss_events_are_never_claim_even_with_supporting_evidence():
+    # D-016: prep-only evidence is consistent with a loss (SUPPORTED); still REVIEW (D-011).
     for ct, records in (
         (ChargeType.LOST_INBOUND, [prep_all_pass()]),
         (ChargeType.DAMAGED_IN_WAREHOUSE, [prep_all_pass()]),
@@ -296,13 +297,133 @@ def test_loss_events_are_never_claim_even_with_contradicting_evidence():
             d = run(charge(charge_type=ct, amount=amount), records)
             assert d.decision == Decision.REVIEW, (ct, amount)
             assert d.rule_id == "R_AMOUNT_NOT_COMPUTABLE"
-            assert d.evidence_status == EvidenceStatus.CONTRADICTED
+            assert d.evidence_status == EvidenceStatus.SUPPORTED
             assert _verdicts(d)["amount_computable"] == Verdict.FAIL
             assert d.claim is None
             assert d.next_action is not None and "unit value" in d.next_action
 
 
-def test_lost_inbound_with_a_later_customer_return_is_conflicting():
+# --- loss events: one test per row of config loss_event_outcomes (D-016) ------------------
+
+# Words that would steer a reviewer towards claiming. Never in a next action where the
+# evidence refutes the seller's claim.
+CLAIM_WORDS = ("override", "claim the", "to claim", "CLAIM", "amount")
+
+
+def _returns(
+    record_id: str = "RTN-1",
+    *,
+    identity: str = "PASS",
+    parts: str | None = "PASS",
+    condition: str | None = "PASS",
+    captured: datetime = datetime(2026, 6, 24, 8, tzinfo=UTC),
+    status: RecordStatus = RecordStatus.FINAL,
+) -> EvidenceRecord:
+    checks = [check("identity_match", identity)]
+    if parts is not None:
+        checks.append(check("parts_complete", parts))
+    if condition is not None:
+        checks.append(check("returned_item_condition", condition))
+    return record(
+        record_id,
+        agent="returns",
+        order_id="ORD-1",
+        fba_shipment_id=None,
+        captured=captured,
+        checks=checks,
+        status=status,
+    )
+
+
+def _refund_line() -> Charge:
+    return charge(
+        charge_type=ChargeType.REFUND_ISSUED_ITEM_NOT_RETURNED,
+        amount="0.00",
+        order_id="ORD-1",
+        posted=date(2026, 6, 24),
+    )
+
+
+def _lost_line(**kw: object) -> Charge:
+    return charge(charge_type=ChargeType.LOST_INBOUND, amount="0.00", **kw)  # type: ignore[arg-type]
+
+
+def _no_claim_steer(d: DecisionRecord) -> None:
+    assert d.next_action is None or not any(w in d.next_action for w in CLAIM_WORDS), d.next_action
+
+
+def test_refund_returned_complete_is_do_not_claim():
+    d = run(_refund_line(), [_returns()])
+    assert d.decision == Decision.DO_NOT_CLAIM and d.rule_id == "R_ITEM_RETURNED"
+    assert d.evidence_status == EvidenceStatus.CONTRADICTED
+    assert d.claim is None and d.next_action is None
+    assert "nothing is owed" in d.reason
+    assert [c.id for c in d.citations if c.role == "contradicts"] == ["RTN-1"]
+
+
+def test_refund_returned_parts_missing_is_review_possible_separate_claim():
+    # FEE-0038-2 pattern: identity PASS, parts_complete FAIL (tub missing), condition PASS.
+    d = run(_refund_line(), [_returns(parts="FAIL")])
+    assert d.decision == Decision.REVIEW and d.rule_id == "R_RETURNED_INCOMPLETE_OR_DAMAGED"
+    assert d.evidence_status == EvidenceStatus.CONTRADICTED
+    assert "possible separate claim" in d.reason and d.claim is None
+    _no_claim_steer(d)
+
+
+def test_refund_returned_damaged_is_review_possible_separate_claim():
+    # FEE-0041-2 pattern: identity PASS, parts complete, condition FAIL (damaged).
+    d = run(_refund_line(), [_returns(condition="FAIL")])
+    assert d.decision == Decision.REVIEW and d.rule_id == "R_RETURNED_INCOMPLETE_OR_DAMAGED"
+    assert d.evidence_status == EvidenceStatus.CONTRADICTED
+    _no_claim_steer(d)
+
+
+def test_refund_returned_condition_uncertain_is_review_not_do_not_claim():
+    # FEE-0014-4 pattern: identity PASS, parts complete, condition UNCERTAIN (signs_of_use).
+    d = run(_refund_line(), [_returns(condition="UNCERTAIN")])
+    assert d.decision == Decision.REVIEW and d.rule_id == "R_RETURNED_INCOMPLETE_OR_DAMAGED"
+    assert "condition uncertain" in d.reason
+    _no_claim_steer(d)
+
+
+def test_refund_returned_without_condition_recorded_is_not_complete():
+    d = run(_refund_line(), [_returns(parts=None, condition=None)])
+    assert d.decision == Decision.REVIEW and d.rule_id == "R_RETURNED_INCOMPLETE_OR_DAMAGED"
+
+
+def test_refund_wrong_item_returned_is_supported_review_until_amount():
+    d = run(_refund_line(), [_returns(identity="FAIL")])
+    assert d.decision == Decision.REVIEW and d.rule_id == "R_AMOUNT_NOT_COMPUTABLE"
+    assert d.evidence_status == EvidenceStatus.SUPPORTED
+    assert d.next_action is not None and "unit value" in d.next_action
+
+
+def test_refund_no_return_in_window_is_insufficient_noting_consistency():
+    # The unit resolves through its prep record; no returns record exists for the order.
+    d = run(_refund_line(), [prep_all_pass()])
+    assert d.decision == Decision.REVIEW
+    assert d.reason_code == ReasonCode.NO_RELEVANT_EVIDENCE
+    assert d.evidence_status == EvidenceStatus.INSUFFICIENT
+    assert "consistent with the seller's claim" in d.reason
+
+
+def test_refund_pending_return_record_is_insufficient():
+    d = run(_refund_line(), [_returns(status=RecordStatus.PENDING)])
+    assert d.decision == Decision.REVIEW and d.rule_id == "R_INSUFFICIENT"
+    assert d.evidence_status == EvidenceStatus.INSUFFICIENT
+
+
+def test_lost_inbound_prep_only_is_supported_review_until_amount():
+    # FEE-0031-1 pattern: prep on the shipment, no later record of the unit.
+    d = run(_lost_line(posted=date(2026, 6, 22)), [prep_all_pass()])
+    assert d.decision == Decision.REVIEW and d.rule_id == "R_AMOUNT_NOT_COMPUTABLE"
+    assert d.evidence_status == EvidenceStatus.SUPPORTED
+    assert _verdicts(d)["evidence_contradicts_charge"] == Verdict.FAIL
+    assert [c.role for c in d.citations] == ["supports"]
+
+
+def test_lost_inbound_with_a_later_customer_return_is_loss_doubtful():
+    # FEE-0014-2 pattern: prep before the loss, a customer return after it.
     ret = record(
         "RTN-1",
         agent="returns",
@@ -310,47 +431,67 @@ def test_lost_inbound_with_a_later_customer_return_is_conflicting():
         captured=datetime(2026, 6, 29, tzinfo=UTC),
         checks=[check("identity_match", "PASS")],
     )
-    c = charge(charge_type=ChargeType.LOST_INBOUND, amount="0.00", posted=date(2026, 6, 19))
-    d = run(c, [prep_all_pass(), ret])
-    assert d.decision == Decision.REVIEW
-    assert d.evidence_status == EvidenceStatus.CONFLICTING
-
-
-def test_refund_not_returned_with_return_record_is_contradicted_but_review():
-    ret = record(
-        "RTN-1",
-        agent="returns",
-        order_id="ORD-1",
-        captured=datetime(2026, 6, 24, 8, tzinfo=UTC),
-        checks=[check("identity_match", "PASS"), check("returned_item_condition", "PASS")],
-    )
-    c = charge(
-        charge_type=ChargeType.REFUND_ISSUED_ITEM_NOT_RETURNED,
-        amount="0.00",
-        order_id="ORD-1",
-        posted=date(2026, 6, 24),
-    )
-    d = run(c, [ret])
-    assert d.decision == Decision.REVIEW
+    d = run(_lost_line(posted=date(2026, 6, 19)), [prep_all_pass(), ret])
+    assert d.decision == Decision.REVIEW and d.rule_id == "R_LOSS_DOUBTFUL"
     assert d.evidence_status == EvidenceStatus.CONTRADICTED
+    assert "loss is doubtful" in d.reason and d.claim is None
+    assert {c.id: c.role for c in d.citations} == {"PRP-1": "supports", "RTN-1": "contradicts"}
+    _no_claim_steer(d)
 
 
-def test_refund_not_returned_wrong_item_back_is_supported_still_review():
+def test_lost_inbound_pending_later_return_is_insufficient_not_supported():
     ret = record(
         "RTN-1",
         agent="returns",
-        order_id="ORD-1",
-        captured=datetime(2026, 6, 24, 8, tzinfo=UTC),
-        checks=[check("identity_match", "FAIL")],
+        fba_shipment_id=None,
+        captured=datetime(2026, 6, 29, tzinfo=UTC),
+        checks=[check("identity_match", "PASS")],
+        status=RecordStatus.PENDING,
     )
-    c = charge(
-        charge_type=ChargeType.REFUND_ISSUED_ITEM_NOT_RETURNED,
-        amount="0.00",
-        order_id="ORD-1",
-        posted=date(2026, 6, 24),
-    )
-    d = run(c, [ret])
-    assert d.decision == Decision.REVIEW and d.evidence_status == EvidenceStatus.SUPPORTED
+    d = run(_lost_line(posted=date(2026, 6, 19)), [prep_all_pass(), ret])
+    assert d.decision == Decision.REVIEW and d.rule_id == "R_INSUFFICIENT"
+
+
+def test_damaged_prep_with_failed_check_is_insufficient():
+    prep = record("PRP-1", checks=[check("fnsku_label_placement", "FAIL")])
+    d = run(charge(charge_type=ChargeType.DAMAGED_IN_WAREHOUSE, amount="14.00"), [prep])
+    assert d.decision == Decision.REVIEW and d.rule_id == "R_INSUFFICIENT"
+
+
+def test_loss_event_past_known_deadline_is_do_not_claim_with_proxy_note():
+    rules = rules_with_window(60, "damaged_in_warehouse")
+    c = charge(charge_type=ChargeType.DAMAGED_IN_WAREHOUSE, amount="14.00")  # posted 07-18
+    d = run(c, [prep_all_pass()], rules=rules)  # as of 09-25: deadline 09-16 passed
+    assert d.decision == Decision.DO_NOT_CLAIM
+    assert d.reason_code == ReasonCode.FILING_WINDOW_EXPIRED
+    assert d.rule_id == "R_FILING_WINDOW_PASSED"
+    assert "proxy for the event date" in d.reason
+    assert d.evidence_status == EvidenceStatus.SUPPORTED  # evidence checks kept
+    assert _verdicts(d)["evidence_contradicts_charge"] == Verdict.FAIL
+    assert d.citations and d.claim is None
+
+
+def test_every_loss_outcome_the_assessors_emit_has_a_config_row():
+    emitted = {
+        ChargeType.REFUND_ISSUED_ITEM_NOT_RETURNED: {
+            "returned_complete",
+            "returned_incomplete_or_damaged",
+            "wrong_item_returned",
+        },
+        ChargeType.LOST_INBOUND: {"shipped_no_later_sighting", "later_sighting"},
+        ChargeType.DAMAGED_IN_WAREHOUSE: {"left_prep_undamaged"},
+    }
+    assert {ct: set(m.outcomes) for ct, m in CFG.loss_event_outcomes.items()} == emitted
+
+
+def test_refuting_rows_never_suggest_an_override_to_claim():
+    for mapping in CFG.loss_event_outcomes.values():
+        for row in mapping.outcomes.values():
+            if row.amount_needed:
+                continue
+            assert row.next_action is None or not any(w in row.next_action for w in CLAIM_WORDS), (
+                row.rule_id
+            )
 
 
 # --- weight tier and unresolved -------------------------------------------------------

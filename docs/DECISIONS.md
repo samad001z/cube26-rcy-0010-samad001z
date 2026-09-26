@@ -131,3 +131,13 @@ Status: accepted (2026-09-25, Day 3 Task 4 and the rules-guardian review).
 - Decisions are judged as of today (UTC). The caller cannot choose `as_of`: a past date would reopen an expired filing window, a future date would store DO_NOT_CLAIM `FILING_WINDOW_EXPIRED` for charges still fileable. Replays use the CLI.
 - `check_windows_consistent` runs before anything is written, so a bad engine config refuses the request (500) instead of storing charges with no decision.
 - Limitation: FastAPI parses the multipart body before the key check, so an unauthenticated upload is received (not stored) before its 401. A request-size limit in front of the app is deployment work (Day 5).
+
+### D-021 Overrides live in their own append-only table; the engine's decision row is never changed
+Status: proposed (2026-09-26, Day 4). Needs the human lead's review.
+- `decision_overrides` (migration 0004): one row per override, `SELECT, INSERT` only for the app role, RLS enabled and forced, foreign key `(organization_id, decision_record_id)` to `decisions`, so an override can only point at a stored decision of the same organisation. Database checks: the new decision must differ from the one it replaces, a CLAIM carries a positive amount and nothing else does, reason and reviewer are not blank, `(org, decision, sequence)` is unique.
+- The effective decision is the newest override, or the engine's decision when there is none. The effective record (`app/review`) is the engine record with `overrides` filled, `status: overridden`, `outcome.decided_by: human:<reviewer>` and the new decision; rule id, reason, checks and citations stay the engine's. It gets its own content hash; the engine record's hash still verifies.
+- Each override stores the engine record's hash and the previous override's hash. `check_chain` re-verifies the chain on every read and before every new override; a broken chain refuses new overrides (409) and is shown on the detail endpoint as `integrity_problems`.
+- A human CLAIM claims the charge not yet reimbursed (`amount_charged - amount_reimbursed`, from the engine's pre-check). Refused when nothing remains, and refused on a pending (fail-open) record, whose reimbursements were never computed. No partial amounts in Round 2.
+- Overrides are serialised per decision with a transaction-scoped advisory lock; the unique sequence is the database backstop.
+- Limitation: the API key identifies an organisation, not a person. The reviewer name is recorded as the caller gives it.
+- Overrides attach to one decision in one run. A re-run makes new decisions without overrides; the detail endpoint lists earlier decisions of the same line (`line_history`) so the reviewer sees the earlier override.

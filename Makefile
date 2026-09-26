@@ -8,7 +8,7 @@ export EVAL_MIGRATION_DATABASE_URL ?= postgresql+psycopg://alibi_owner:local_dev
 export ATTACHMENT_KEY_SECRET ?= local-dev-attachment-secret
 export LLM_ENABLED ?= false
 
-.PHONY: install db-up db-down migrate lint fmt test dev run sheet eval
+.PHONY: install db-up db-down migrate lint fmt test dev run sheet eval ui ui-build
 
 install:
 	cd backend && uv sync
@@ -52,3 +52,10 @@ sheet:
 # Refuses unless both label files are committed; see eval/README.md. Resets alibi_eval.
 eval:
 	cd backend && uv run python ../eval/run_eval.py
+
+# Review UI (frontend/README.md). Needs the API on :8000 (make dev).
+ui:
+	cd frontend && npm install && ALIBI_BACKEND_URL=$${ALIBI_BACKEND_URL:-http://localhost:8000} npm run dev
+
+ui-build:
+	cd frontend && npm ci && npx eslint && npx next build

@@ -2,6 +2,19 @@
 
 Update at the end of every session. Newest entry on top.
 
+### 2026-09-26 - Day 4 (overrides, review endpoints, review UI), branch `day4-review`
+- Done:
+  - Override flow (D-021, proposed): `decision_overrides` table (migration 0004), append-only, forced RLS, FK to the decision, database checks (no-op, claim amount, blank reason or reviewer, unique sequence). `app/review`: effective record, hash chain re-checked on every read and before every override, human CLAIM = charged minus reimbursed, refused on pending records and when nothing remains, advisory lock per decision. Audit event `DECISION_OVERRIDDEN`. Closes triage finding 11.
+  - Review endpoints behind the same API key and RLS: `GET /runs`, `GET /decisions[?run_id=]`, `GET /decisions/{id}` (charge, evidence trail with hash checks, override history, integrity problems, line history), `POST /decisions/{id}/overrides`. Another org's record answers 404. A dead database answers 503.
+  - Review UI (`frontend/`, Next.js 16): sign-in with the org key into an httpOnly cookie, decisions table (REVIEW first, counts, why-review breakdown, filters, run picker), decision detail, override form, upload page for new runs. Light and dark, phone width checked.
+- Tests/eval status: `make lint test` green: 304 backend and 46 eval tests on Postgres 16 (46 new: overrides and review API, including concurrency, tampered history, DB constraints, cross-org 404s, 503s). Mutation check on `app/review`: 6 of 6 mutants caught (the lock test first survived because the race never happened; the test now forces the overlap). Frontend: `eslint` clean, `next build` passes. End-to-end in headless Chromium against a live backend: redirect to sign-in, bad key refused, cookie httpOnly and invisible to `document.cookie`, DO_NOT_CLAIM and CLAIM overrides saved and shown, no console errors. `alibi run` counts unchanged. No eval result yet (labels still blank).
+- Not done: rules-guardian and test-guardian reviews of this branch were not run in this session. Branch not merged.
+- Open issues:
+  - Two humans still need to label `eval/labelling_sheet.csv` before `make eval`. This is the blocker for the 25-point evaluation section.
+  - Reviewer identity is self-declared (org key, not a person).
+  - Overrides do not carry across re-runs; the detail page shows earlier runs of the line.
+- Next step: human lead reviews D-021 and merges `day4-review`; labelling; Day 5 deploy and LLM layer.
+
 ### 2026-09-25 - Day 3 (eval set, harness, POST /agent), branch `day3-eval`
 - Done:
   - Task 0: `docs/design/` archived to `docs/archive/pre-round2-design/` (README: history only). PRD moved to `docs/product/PRD.md` and aligned with the build: F1 CSV only, no PDF/email, no Jev, the vocabulary, held-out eval, no forbidden wording. References updated (CLAUDE.md, ROUND2_PLAN, DECISIONS, rules-guardian, /phase).

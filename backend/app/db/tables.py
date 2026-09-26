@@ -107,3 +107,20 @@ decisions = sa.Table(
     sa.Column("body", pg.JSONB),
     sa.Column("decided_at", sa.DateTime(timezone=True)),
 )
+decision_overrides = sa.Table(
+    "decision_overrides",
+    metadata,
+    _id(),
+    sa.Column("organization_id", sa.Text),
+    sa.Column("decision_record_id", sa.Text),
+    sa.Column("line_id", sa.Text),
+    sa.Column("sequence", sa.Integer),
+    sa.Column("original_decision", sa.Text),
+    sa.Column("new_decision", sa.Text),
+    sa.Column("claim_amount", sa.Numeric(12, 2)),
+    sa.Column("reason", sa.Text),
+    sa.Column("reviewer", sa.Text),
+    sa.Column("at", sa.DateTime(timezone=True)),
+    sa.Column("content_hash", sa.Text),
+    sa.Column("body", pg.JSONB),
+)

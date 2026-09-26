@@ -19,6 +19,7 @@ ALL_TABLES = [
     t.quarantined_rows,
     t.audit_events,
     t.decisions,
+    t.decision_overrides,
 ]
 
 

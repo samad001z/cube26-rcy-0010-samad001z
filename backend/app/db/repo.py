@@ -4,7 +4,8 @@ row-level security, not these functions, is what enforces tenancy."""
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any
+from datetime import datetime
+from typing import TYPE_CHECKING, Any
 
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert
@@ -15,6 +16,9 @@ from app.db import tables as t
 from app.models.charge import Charge, SourceRef
 from app.models.contract import EvidenceRecord
 from app.models.decision import DecisionRecord
+
+if TYPE_CHECKING:
+    from app.review import OverrideRecord
 
 
 @dataclass(frozen=True)
@@ -234,3 +238,108 @@ def list_decisions(session: Session, run_id: str | None = None) -> list[Decision
         stmt = stmt.where(t.decisions.c.run_id == uuid.UUID(run_id))
     bodies: Sequence[Any] = session.execute(stmt).scalars().all()
     return [DecisionRecord.model_validate(b) for b in bodies]
+
+
+def get_decision(session: Session, record_id: str) -> DecisionRecord | None:
+    body = session.execute(
+        sa.select(t.decisions.c.body).where(t.decisions.c.record_id == record_id)
+    ).scalar_one_or_none()
+    return DecisionRecord.model_validate(body) if body is not None else None
+
+
+def list_decisions_for_line(session: Session, line_id: str) -> list[DecisionRecord]:
+    """Every decision ever made for a charge line, oldest first."""
+    bodies: Sequence[Any] = (
+        session.execute(
+            sa.select(t.decisions.c.body)
+            .where(t.decisions.c.line_id == line_id)
+            .order_by(t.decisions.c.decided_at, t.decisions.c.record_id)
+        )
+        .scalars()
+        .all()
+    )
+    return [DecisionRecord.model_validate(b) for b in bodies]
+
+
+@dataclass(frozen=True)
+class RunRow:
+    run_id: str
+    decided_at: datetime
+    charges: int
+    counts: dict[str, int]
+
+
+def list_runs(session: Session) -> list[RunRow]:
+    """Runs with at least one decision, newest first."""
+    rows = session.execute(
+        sa.select(
+            t.decisions.c.run_id,
+            sa.func.min(t.decisions.c.decided_at).label("at"),
+            t.decisions.c.decision,
+            sa.func.count().label("n"),
+        ).group_by(t.decisions.c.run_id, t.decisions.c.decision)
+    ).all()
+    runs: dict[str, RunRow] = {}
+    for r in rows:
+        key = str(r.run_id)
+        run = runs.get(key)
+        if run is None:
+            run = runs[key] = RunRow(key, r.at, 0, {})
+        run.counts[r.decision] = r.n
+        runs[key] = RunRow(key, min(run.decided_at, r.at), run.charges + r.n, run.counts)
+    return sorted(runs.values(), key=lambda x: (x.decided_at, x.run_id), reverse=True)
+
+
+def insert_override(session: Session, organization_id: str, rec: "OverrideRecord") -> None:
+    session.execute(
+        insert(t.decision_overrides).values(
+            organization_id=organization_id,
+            decision_record_id=rec.decision_record_id,
+            line_id=rec.line_id,
+            sequence=rec.sequence,
+            original_decision=rec.override.original_decision,
+            new_decision=rec.override.new_decision,
+            claim_amount=rec.claim.amount if rec.claim else None,
+            reason=rec.override.reason,
+            reviewer=rec.override.reviewer,
+            at=rec.override.at,
+            content_hash=rec.content_hash,
+            body=rec.model_dump(mode="json"),
+        )
+    )
+
+
+def _override_bodies(session: Session, where: sa.ColumnElement[bool]) -> Sequence[Any]:
+    return (
+        session.execute(
+            sa.select(t.decision_overrides.c.body)
+            .where(where)
+            .order_by(t.decision_overrides.c.decision_record_id, t.decision_overrides.c.sequence)
+        )
+        .scalars()
+        .all()
+    )
+
+
+def list_overrides(session: Session, record_id: str) -> list["OverrideRecord"]:
+    from app.review import OverrideRecord
+
+    bodies = _override_bodies(session, t.decision_overrides.c.decision_record_id == record_id)
+    return [OverrideRecord.model_validate(b) for b in bodies]
+
+
+def overrides_by_record(
+    session: Session, record_ids: Sequence[str]
+) -> dict[str, list["OverrideRecord"]]:
+    from app.review import OverrideRecord
+
+    out: dict[str, list[OverrideRecord]] = {}
+    if not record_ids:
+        return out
+    bodies = _override_bodies(
+        session, t.decision_overrides.c.decision_record_id.in_(list(record_ids))
+    )
+    for b in bodies:
+        o = OverrideRecord.model_validate(b)
+        out.setdefault(o.decision_record_id, []).append(o)
+    return out

@@ -19,10 +19,15 @@ from sqlalchemy.orm import Session
 
 from app.api.agent import db_engine
 from app.api.auth import require_org
-from app.core.rules import load_engine_config
+from app.core.rules import EngineConfig, load_engine_config
 from app.db import repo
 from app.db.session import org_session
+from app.models.charge import Charge
+from app.models.contract import EvidenceRecord
 from app.models.decision import DecisionRecord
+from app.models.vocab import Verdict
+from app.precheck import NOT_YET_ELIGIBLE
+from app.retrieval import custody_window
 from app.review import (
     OverrideError,
     OverrideRecord,
@@ -94,6 +99,51 @@ def _earlier_override(o: OverrideRecord | None, current_record_id: str) -> dict[
     }
 
 
+def _iso(dt: datetime) -> str:
+    """UTC timestamps in the same form as the records' own JSON (trailing Z)."""
+    return dt.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+def _custody_window(
+    charge: Charge | None, body: EvidenceRecord | None, rec: DecisionRecord, cfg: EngineConfig
+) -> dict[str, Any] | None:
+    """The window in which this pod's records can speak to the charge, as the engine used it.
+    Computed from the engine config only when it is the config the decision was made with
+    (same config hash); otherwise null, and the stored `why` text is the record of it."""
+    if charge is None or body is None or cfg.config_hash != rec.config_hash:
+        return None
+    rel = cfg.charge_types[charge.charge_type].pods.get(body.agent)  # type: ignore[call-overload]
+    if rel is None:
+        return None
+    start, end = custody_window(charge, rel)
+    return {
+        "start": _iso(start),
+        "end": _iso(end),  # exclusive
+        "basis": rel.window,
+        "anchor": "posted_date",
+        "posted_date": charge.posted_date.isoformat(),
+        "captured_inside": start <= body.captured_at < end,
+    }
+
+
+def _deadline(rec: DecisionRecord) -> dict[str, Any]:
+    """The filing deadline status, from the decision's `within_filing_window` check:
+    open (PASS), closed or not yet open (FAIL), or not verified (UNCERTAIN, no sourced rule)."""
+    c = next((x for x in rec.checks if x.check_key == "within_filing_window"), None)
+    if c is None:
+        return {"status": "unknown", "verdict": None, "detail": "not checked"}
+    detail = c.detail or ""
+    if c.verdict == Verdict.PASS:
+        state = "open"
+    elif c.verdict == Verdict.UNCERTAIN:
+        state = "not_verified"
+    elif NOT_YET_ELIGIBLE in detail:
+        state = "not_yet_open"
+    else:
+        state = "passed"
+    return {"status": state, "verdict": c.verdict.value, "detail": detail}
+
+
 @router.get("/runs")
 def list_runs(org: Org, engine: Db) -> list[dict[str, Any]]:
     try:
@@ -161,6 +211,7 @@ def get_decision(record_id: str, org: Org, engine: Db) -> dict[str, Any]:
                 raise HTTPException(status.HTTP_404_NOT_FOUND, f"no decision {record_id!r}")
             overrides = repo.list_overrides(session, record_id)
             charge = repo.get_charge(session, rec.subject.line_id)
+            cfg = load_engine_config()
             evidence = []
             for c in rec.evidence_considered:
                 found = repo.get_record_with_hash(session, c.agent, c.record_id)
@@ -175,6 +226,8 @@ def get_decision(record_id: str, org: Org, engine: Db) -> dict[str, Any]:
                             x.kind == "evidence" and x.id == c.record_id and x.agent == c.agent
                             for x in rec.citations
                         ),
+                        "captured_at": _iso(body.captured_at) if body else None,
+                        "custody_window": _custody_window(charge, body, rec, cfg),
                         "hash_at_decision": c.content_hash,
                         "hash_matches_decision": stored == c.content_hash,
                         "record_hash_verifies": body.verify_hash() if body else False,
@@ -188,7 +241,7 @@ def get_decision(record_id: str, org: Org, engine: Db) -> dict[str, Any]:
                 history.append(_summary(d, ovs, _problems(session, d, ovs)))
             problems = _problems(session, rec, overrides)
             is_newest = line_decisions[-1].record_id == rec.record_id
-            claim_blocked = claim_refusal(rec, load_engine_config())
+            claim_blocked = claim_refusal(rec, cfg)
     except SQLAlchemyError as exc:
         raise _unavailable(exc) from None
     return {
@@ -199,6 +252,7 @@ def get_decision(record_id: str, org: Org, engine: Db) -> dict[str, Any]:
         # Whether the override form may be used, and why CLAIM is not offered (D-021).
         "overridable": is_newest,
         "claim_refusal": claim_blocked,
+        "deadline": _deadline(rec),
         "charge": charge.model_dump(mode="json") if charge else None,
         "evidence": evidence,
         "line_history": history,

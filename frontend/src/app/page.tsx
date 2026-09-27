@@ -15,12 +15,12 @@ const TILE: Record<DecisionValue, { title: string; hint: string; style: string }
   CLAIM: {
     title: "Claim",
     hint: "Evidence contradicts the charge, with full coverage.",
-    style: "border-line bg-surface text-claim",
+    style: "border-claim-line bg-claim-bg text-claim",
   },
   DO_NOT_CLAIM: {
     title: "Do not claim",
     hint: "Evidence supports the charge, or it is reimbursed or out of time.",
-    style: "border-line bg-surface text-dnc",
+    style: "border-dnc-line bg-dnc-bg text-dnc",
   },
 };
 

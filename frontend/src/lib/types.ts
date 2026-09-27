@@ -131,12 +131,30 @@ export interface EvidenceRecordBody {
   subject: Record<string, string | null>;
 }
 
+/** Where records of this pod can speak to the charge, as the engine used it. End is exclusive. */
+export interface CustodyWindow {
+  start: string;
+  end: string;
+  basis: "before_posting" | "after_posting" | "around_posting";
+  anchor: "posted_date";
+  posted_date: string;
+  captured_inside: boolean;
+}
+
+export interface Deadline {
+  status: "open" | "passed" | "not_yet_open" | "not_verified" | "unknown";
+  verdict: Verdict | null;
+  detail: string;
+}
+
 export interface EvidenceItem {
   record_id: string;
   agent: string;
   usable: boolean;
   why: string;
   cited: boolean;
+  captured_at: string | null;
+  custody_window: CustodyWindow | null;
   hash_at_decision: string;
   hash_matches_decision: boolean;
   record_hash_verifies: boolean;
@@ -163,6 +181,7 @@ export interface DecisionDetail {
   overridable: boolean;
   /** Why CLAIM is not offered for this record, or null when it may be chosen. */
   claim_refusal: string | null;
+  deadline: Deadline;
   charge: Record<string, unknown> | null;
   evidence: EvidenceItem[];
   line_history: DecisionSummary[];

@@ -12,8 +12,10 @@
 
   --claim: #17693f;
   --claim-bg: #e3f3ea;
+  --claim-line: #8fcfa9;
   --dnc: #475360;
   --dnc-bg: #eceef1;
+  --dnc-line: #b7bec6;
   --review: #8a4f00;
   --review-bg: #fcefd6;
   --review-line: #efc57a;
@@ -37,8 +39,10 @@
 
     --claim: #6fd49d;
     --claim-bg: #16301f;
+    --claim-line: #2f6b47;
     --dnc: #b3bcc6;
     --dnc-bg: #262b31;
+    --dnc-line: #4a525b;
     --review: #f2bd62;
     --review-bg: #33260f;
     --review-line: #6e5118;
@@ -61,8 +65,10 @@
   --color-focus: var(--focus);
   --color-claim: var(--claim);
   --color-claim-bg: var(--claim-bg);
+  --color-claim-line: var(--claim-line);
   --color-dnc: var(--dnc);
   --color-dnc-bg: var(--dnc-bg);
+  --color-dnc-line: var(--dnc-line);
   --color-review: var(--review);
   --color-review-bg: var(--review-bg);
   --color-review-line: var(--review-line);

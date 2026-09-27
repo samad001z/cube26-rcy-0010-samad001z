@@ -3,8 +3,9 @@ import type { ReactNode } from "react";
 import type { DecisionValue, RecordStatus, Verdict } from "@/lib/types";
 
 const DECISION_STYLE: Record<DecisionValue, string> = {
-  CLAIM: "bg-claim-bg text-claim",
-  DO_NOT_CLAIM: "bg-dnc-bg text-dnc",
+  // Same weight for all three: REVIEW is a first-class outcome, not a lesser one.
+  CLAIM: "bg-claim-bg text-claim ring-1 ring-inset ring-claim-line",
+  DO_NOT_CLAIM: "bg-dnc-bg text-dnc ring-1 ring-inset ring-dnc-line",
   REVIEW: "bg-review-bg text-review ring-1 ring-inset ring-review-line",
 };
 

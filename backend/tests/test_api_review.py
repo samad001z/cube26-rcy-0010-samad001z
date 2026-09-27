@@ -339,3 +339,27 @@ def test_detail_says_why_claim_is_not_offered(client, app_engine):
         headers=_h(ALPHA_KEY),
     )
     assert r.status_code == 409
+
+
+def test_detail_gives_captured_at_custody_window_and_deadline_as_fields(client, app_engine):
+    decisions = _latest(app_engine, ALPHA)
+    d = next(x for x in decisions if x.evidence_considered)
+    body = client.get(f"/decisions/{d.record_id}", headers=_h(ALPHA_KEY)).json()
+    for e in body["evidence"]:
+        assert e["captured_at"] == e["record"]["captured_at"]
+        w = e["custody_window"]
+        assert w is not None and w["start"] < w["end"] and w["anchor"] == "posted_date"
+        assert w["posted_date"] == body["charge"]["posted_date"]
+        # The same judgement the engine wrote into the trace at decision time.
+        assert w["captured_inside"] == (" inside custody window " in e["why"])
+        assert f"[{w['start'][:10]}, {w['end'][:10]})" in e["why"]
+    statuses = {}
+    for x in decisions:
+        got = client.get(f"/decisions/{x.record_id}", headers=_h(ALPHA_KEY)).json()["deadline"]
+        verdict = x.check("within_filing_window").verdict.value
+        assert got["verdict"] == verdict
+        assert got["detail"] == x.check("within_filing_window").detail
+        statuses[x.subject.line_id] = got["status"]
+    assert statuses["FEE-0071-2"] == "passed"
+    assert {"passed", "not_verified"} <= set(statuses.values())
+    assert set(statuses.values()) <= {"open", "passed", "not_yet_open", "not_verified"}

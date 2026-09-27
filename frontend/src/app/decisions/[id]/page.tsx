@@ -3,13 +3,47 @@ import { notFound, unstable_rethrow } from "next/navigation";
 
 import { Card, DecisionBadge, Field, Hash, Money, Notice, StatusPill, VerdictBadge, label } from "@/components/ui";
 import { BackendError, api } from "@/lib/api";
-import type { DecisionDetail, EvidenceItem } from "@/lib/types";
+import { checkName } from "@/lib/checks";
+import type { CustodyWindow, DecisionDetail, Deadline, EvidenceItem } from "@/lib/types";
 
 import { OverrideForm } from "./override-form";
 
 function when(iso: string): string {
   return new Date(iso).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" }) + " UTC";
 }
+
+function day(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-GB", { dateStyle: "medium", timeZone: "UTC" });
+}
+
+const BASIS: Record<CustodyWindow["basis"], string> = {
+  before_posting: "before the charge was posted",
+  after_posting: "after the charge was posted",
+  around_posting: "around the date the charge was posted",
+};
+
+/** One sentence: when the record was captured and whether that falls in the window. */
+function windowSentence(e: EvidenceItem): string | null {
+  const w = e.custody_window;
+  if (!e.captured_at) return null;
+  const captured = `Recorded ${when(e.captured_at)}.`;
+  if (!w) return `${captured} The custody window is described in the note above.`;
+  // End is exclusive: the last day inside the window is the day before `end`.
+  const lastDay = new Date(new Date(w.end).getTime() - 1).toISOString();
+  return (
+    `${captured} Records from this pod count if made ${BASIS[w.basis]} ` +
+    `(posted ${day(w.posted_date)}): from ${day(w.start)} to ${day(lastDay)}. ` +
+    (w.captured_inside ? "This one is inside that window." : "This one is outside that window.")
+  );
+}
+
+const DEADLINE_TEXT: Record<Deadline["status"], string> = {
+  open: "The filing window is open: a claim can still be filed.",
+  passed: "The filing deadline has passed: no claim can be filed.",
+  not_yet_open: "The filing window has not opened yet: a claim cannot be filed before it opens.",
+  not_verified: "No sourced filing deadline for this charge type: the deadline is not verified.",
+  unknown: "The filing deadline was not checked.",
+};
 
 function EvidenceCard({ e }: { e: EvidenceItem }) {
   const hashOk = e.hash_matches_decision && e.record_hash_verifies;
@@ -31,20 +65,30 @@ function EvidenceCard({ e }: { e: EvidenceItem }) {
         {e.usable ? "Usable: " : "Not usable: "}
         {e.why}
       </p>
+      {windowSentence(e) && (
+        <p className={`mt-1 text-xs ${e.custody_window && !e.custody_window.captured_inside ? "text-review" : ""}`}>
+          {windowSentence(e)}
+        </p>
+      )}
       {e.record && (
         <>
           <p className="mt-1 text-[11px] text-muted">
-            captured {when(e.record.captured_at)}
-            {e.record.operator_label && <> · by {e.record.operator_label}</>}
-            {e.record.outcome && <> · pod outcome {e.record.outcome.decision}</>} · status {e.record.status}
+            {[
+              e.record.operator_label && `by ${e.record.operator_label}`,
+              e.record.outcome && `pod outcome ${e.record.outcome.decision}`,
+              `status ${e.record.status}`,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
           </p>
           {e.record.checks.length > 0 && (
             <ul className="mt-2 space-y-1">
               {e.record.checks.map((c) => (
                 <li key={c.check_key} className="flex flex-wrap items-baseline gap-2 text-xs">
                   <VerdictBadge value={c.verdict} />
-                  <span className="font-mono">{c.check_key}</span>
-                  {c.detail && <span className="text-muted">{c.detail}</span>}
+                  <span>{checkName(c.check_key)}</span>
+                  <span className="font-mono text-[10px] text-muted">{c.check_key}</span>
+                  {c.detail && <span className="text-muted">· {c.detail}</span>}
                 </li>
               ))}
             </ul>
@@ -121,6 +165,11 @@ export default async function DecisionPage({ params }: PageProps<"/decisions/[id
                 {r.next_action}
               </p>
             )}
+            <p className={`mt-3 text-sm ${d.deadline.status === "passed" || d.deadline.status === "not_yet_open" ? "text-fail" : ""}`}>
+              <span className="font-semibold">Deadline: </span>
+              {DEADLINE_TEXT[d.deadline.status]}
+              {d.deadline.detail && <span className="text-xs text-muted"> ({d.deadline.detail})</span>}
+            </p>
             {r.warnings.length > 0 && (
               <ul className="mt-3 space-y-1">
                 {r.warnings.map((w) => (
@@ -150,7 +199,10 @@ export default async function DecisionPage({ params }: PageProps<"/decisions/[id
                     <td className="py-1.5 pr-3 align-top">
                       <VerdictBadge value={c.verdict} />
                     </td>
-                    <td className="py-1.5 pr-3 align-top font-mono text-xs">{c.check_key}</td>
+                    <td className="py-1.5 pr-3 align-top text-xs">
+                      {checkName(c.check_key)}
+                      <div className="font-mono text-[10px] text-muted">{c.check_key}</div>
+                    </td>
                     <td className="num py-1.5 pr-3 align-top text-xs text-muted">{c.confidence ?? ""}</td>
                     <td className="py-1.5 align-top text-xs text-muted">{c.detail}</td>
                   </tr>

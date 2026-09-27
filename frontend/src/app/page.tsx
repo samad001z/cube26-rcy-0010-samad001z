@@ -3,7 +3,7 @@ import { unstable_rethrow } from "next/navigation";
 
 import { DecisionBadge, Money, Notice, label } from "@/components/ui";
 import { BackendError, api } from "@/lib/api";
-import type { DecisionSummary, DecisionValue, Run } from "@/lib/types";
+import type { DecisionList, DecisionValue, Run } from "@/lib/types";
 
 const ORDER: DecisionValue[] = ["REVIEW", "CLAIM", "DO_NOT_CLAIM"];
 const TILE: Record<DecisionValue, { title: string; hint: string; style: string }> = {
@@ -30,21 +30,34 @@ function when(iso: string): string {
 
 export default async function DecisionsPage({ searchParams }: PageProps<"/">) {
   const sp = await searchParams;
-  const runParam = typeof sp.run === "string" ? sp.run : undefined;
-  const show = typeof sp.show === "string" && ORDER.includes(sp.show as DecisionValue) ? (sp.show as DecisionValue) : undefined;
+  const param = (k: string) => (typeof sp[k] === "string" && sp[k] ? (sp[k] as string) : undefined);
+  const runParam = param("run");
+  const show = ORDER.includes(param("show") as DecisionValue) ? (param("show") as DecisionValue) : undefined;
+  const typeParam = param("type");
+  const ruleParam = param("rule");
 
   let runs: Run[];
-  let data: { run: Run | null; items: DecisionSummary[] };
+  let data: DecisionList;
   try {
     runs = await api<Run[]>("/runs");
-    data = await api<{ run: Run | null; items: DecisionSummary[] }>(
-      `/decisions${runParam ? `?run_id=${encodeURIComponent(runParam)}` : ""}`,
-    );
+    const q = new URLSearchParams();
+    if (runParam) q.set("run_id", runParam);
+    if (show) q.set("decision", show);
+    if (typeParam) q.set("charge_type", typeParam);
+    if (ruleParam) q.set("rule_id", ruleParam);
+    data = await api<DecisionList>(`/decisions${q.size ? `?${q}` : ""}`);
   } catch (err) {
     unstable_rethrow(err); // let redirect() to the login page through
     const msg = err instanceof BackendError ? `${err.status}: ${err.message}` : "unknown error";
     return <Notice tone="error">Could not load decisions ({msg}).</Notice>;
   }
+
+  /** Link to this page with some filters changed (undefined removes one). */
+  const href = (change: Record<string, string | undefined>) => {
+    const next = { run: runParam, show, type: typeParam, rule: ruleParam, ...change };
+    const q = new URLSearchParams(Object.entries(next).filter((e): e is [string, string] => !!e[1]));
+    return q.size ? `/?${q}` : "/";
+  };
 
   if (!data.run) {
     return (
@@ -61,9 +74,10 @@ export default async function DecisionsPage({ searchParams }: PageProps<"/">) {
   }
 
   const run = data.run;
-  const counts = Object.fromEntries(ORDER.map((d) => [d, data.items.filter((i) => i.decision === d).length])) as Record<DecisionValue, number>;
+  const counts = Object.fromEntries(ORDER.map((d) => [d, data.counts[d] ?? 0])) as Record<DecisionValue, number>;
   const overridden = data.items.filter((i) => i.override_count > 0).length;
   const pending = data.items.filter((i) => i.status === "pending").length;
+  const filtered = !!(show || typeParam || ruleParam);
   const reviewReasons = Object.entries(
     data.items
       .filter((i) => i.decision === "REVIEW")
@@ -74,11 +88,9 @@ export default async function DecisionsPage({ searchParams }: PageProps<"/">) {
       }, {}),
   ).sort((a, b) => b[1] - a[1]);
 
-  const rows = [...data.items]
-    .filter((i) => !show || i.decision === show)
-    .sort((a, b) => ORDER.indexOf(a.decision) - ORDER.indexOf(b.decision) || a.line_id.localeCompare(b.line_id));
-  const base = runParam ? `/?run=${encodeURIComponent(runParam)}` : "/?";
-  const sep = runParam ? "&" : "";
+  const rows = [...data.items].sort(
+    (a, b) => ORDER.indexOf(a.decision) - ORDER.indexOf(b.decision) || a.line_id.localeCompare(b.line_id),
+  );
 
   return (
     <div className="space-y-6">
@@ -118,7 +130,7 @@ export default async function DecisionsPage({ searchParams }: PageProps<"/">) {
         {ORDER.map((d) => (
           <Link
             key={d}
-            href={show === d ? (runParam ? `/?run=${runParam}` : "/") : `${base}${sep}show=${d}`}
+            href={href({ show: show === d ? undefined : d })}
             className={`rounded-lg border p-4 transition hover:shadow-sm ${TILE[d].style} ${show === d ? "ring-2 ring-focus" : ""}`}
           >
             <div className="text-xs font-semibold uppercase tracking-wide">{TILE[d].title}</div>
@@ -128,9 +140,57 @@ export default async function DecisionsPage({ searchParams }: PageProps<"/">) {
         ))}
       </div>
 
+      <form method="get" action="/" className="flex flex-wrap items-end gap-3 text-sm">
+        {runParam && <input type="hidden" name="run" value={runParam} />}
+        <label className="flex flex-col gap-1">
+          <span className="text-xs font-medium text-muted">Decision</span>
+          <select name="show" defaultValue={show ?? ""} className="rounded-md border border-line bg-surface px-2 py-1.5">
+            <option value="">All</option>
+            {ORDER.map((d) => (
+              <option key={d} value={d}>
+                {label(d)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-xs font-medium text-muted">Charge type</span>
+          <select name="type" defaultValue={typeParam ?? ""} className="rounded-md border border-line bg-surface px-2 py-1.5">
+            <option value="">All</option>
+            {(data.facets.charge_type ?? []).map((t) => (
+              <option key={t} value={t}>
+                {label(t)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-xs font-medium text-muted">Rule</span>
+          <select name="rule" defaultValue={ruleParam ?? ""} className="rounded-md border border-line bg-surface px-2 py-1.5">
+            <option value="">All</option>
+            {(data.facets.rule_id ?? []).map((r) => (
+              <option key={r} value={r}>
+                {r}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button className="rounded-md bg-ink px-3 py-1.5 font-medium text-bg">Filter</button>
+        {filtered && (
+          <Link href={href({ show: undefined, type: undefined, rule: undefined })} className="py-1.5 text-muted hover:text-ink hover:underline">
+            Clear filters
+          </Link>
+        )}
+        {filtered && (
+          <span className="py-1.5 text-muted">
+            Showing <span className="num font-semibold text-ink">{data.items.length}</span> of {run.charges}
+          </span>
+        )}
+      </form>
+
       {reviewReasons.length > 0 && (!show || show === "REVIEW") && (
         <div className="text-sm">
-          <span className="font-medium">Why charges need review: </span>
+          <span className="font-medium">Why {filtered ? "these" : ""} charges need review: </span>
           <span className="text-muted">
             {reviewReasons.map(([k, n], i) => (
               <span key={k}>
@@ -165,6 +225,18 @@ export default async function DecisionsPage({ searchParams }: PageProps<"/">) {
                       <span className="text-[11px] text-muted">engine: {label(i.engine_decision)}</span>
                     )}
                     {i.status === "pending" && <span className="text-[11px] font-medium text-fail">pending</span>}
+                    {i.integrity_problems.length > 0 && (
+                      <span className="text-[11px] font-medium text-fail">history does not verify</span>
+                    )}
+                    {i.earlier_override && (
+                      <span
+                        className="max-w-[11rem] text-[11px] text-review"
+                        title={`"${i.earlier_override.reason}"`}
+                      >
+                        earlier run: {i.earlier_override.reviewer} set {label(i.earlier_override.decision)},{" "}
+                        {when(i.earlier_override.at)}
+                      </span>
+                    )}
                   </div>
                 </td>
                 <td className="px-3 py-2 align-top">
@@ -189,7 +261,7 @@ export default async function DecisionsPage({ searchParams }: PageProps<"/">) {
             {rows.length === 0 && (
               <tr>
                 <td colSpan={7} className="px-3 py-6 text-center text-sm text-muted">
-                  No {show ? label(show) : ""} decisions in this run.
+                  No decisions in this run match these filters.
                 </td>
               </tr>
             )}

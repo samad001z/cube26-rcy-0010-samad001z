@@ -363,3 +363,37 @@ def test_detail_gives_captured_at_custody_window_and_deadline_as_fields(client, 
     assert statuses["FEE-0071-2"] == "passed"
     assert {"passed", "not_verified"} <= set(statuses.values())
     assert set(statuses.values()) <= {"open", "passed", "not_yet_open", "not_verified"}
+
+
+def test_decisions_filter_by_effective_decision_charge_type_and_rule(client, app_engine):
+    h = _h(ALPHA_KEY)
+    full = client.get("/decisions", headers=h).json()
+    items = full["items"]
+    assert sum(full["counts"].values()) == len(items) == full["run"]["charges"]
+    assert set(full["facets"]["charge_type"]) == {i["charge_type"] for i in items}
+    for dec in ("CLAIM", "DO_NOT_CLAIM", "REVIEW"):
+        got = client.get("/decisions", params={"decision": dec}, headers=h).json()
+        assert [i["record_id"] for i in got["items"]] == [
+            i["record_id"] for i in items if i["decision"] == dec
+        ]
+        assert got["counts"] == full["counts"]  # totals describe the whole run
+    ct = next(i["charge_type"] for i in items)
+    rule = next(i["rule_id"] for i in items if i["charge_type"] == ct)
+    got = client.get("/decisions", params={"charge_type": ct, "rule_id": rule}, headers=h).json()
+    expected = [i for i in items if i["charge_type"] == ct and i["rule_id"] == rule]
+    assert got["items"] == expected and expected
+    assert got["filters"] == {"decision": None, "charge_type": ct, "rule_id": rule}
+    # The decision filter reads the effective decision: an overridden line moves with it.
+    overridden = next((i for i in items if i["override_count"] > 0), None)
+    assert overridden is not None  # the `loaded` fixture overrides one decision per org
+    assert overridden["decision"] != overridden["engine_decision"]
+    by_effective = client.get(
+        "/decisions", params={"decision": overridden["decision"]}, headers=h
+    ).json()["items"]
+    by_engine = client.get(
+        "/decisions", params={"decision": overridden["engine_decision"]}, headers=h
+    ).json()["items"]
+    assert overridden["record_id"] in {i["record_id"] for i in by_effective}
+    assert overridden["record_id"] not in {i["record_id"] for i in by_engine}
+    assert client.get("/decisions", params={"decision": "MAYBE"}, headers=h).status_code == 422
+    assert client.get("/decisions", params={"charge_type": "x"}, headers=h).status_code == 422

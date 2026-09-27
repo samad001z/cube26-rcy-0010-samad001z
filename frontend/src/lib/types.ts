@@ -12,6 +12,15 @@ export interface Run {
   counts: Partial<Record<DecisionValue, number>>;
 }
 
+/** GET /decisions. `counts` and `facets` describe the whole run; filters narrow `items`. */
+export interface DecisionList {
+  run: Run | null;
+  counts: Partial<Record<DecisionValue, number>>;
+  facets: { charge_type?: string[]; rule_id?: string[] };
+  filters: { decision?: DecisionValue | null; charge_type?: string | null; rule_id?: string | null };
+  items: DecisionSummary[];
+}
+
 export interface DecisionSummary {
   record_id: string;
   run_id: string;

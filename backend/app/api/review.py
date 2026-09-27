@@ -25,7 +25,7 @@ from app.db.session import org_session
 from app.models.charge import Charge
 from app.models.contract import EvidenceRecord
 from app.models.decision import DecisionRecord
-from app.models.vocab import Verdict
+from app.models.vocab import ChargeType, Decision, Verdict
 from app.precheck import NOT_YET_ELIGIBLE
 from app.retrieval import custody_window
 from app.review import (
@@ -164,14 +164,22 @@ def list_runs(org: Org, engine: Db) -> list[dict[str, Any]]:
 
 @router.get("/decisions")
 def list_decisions(
-    org: Org, engine: Db, run_id: Annotated[str | None, Query()] = None
+    org: Org,
+    engine: Db,
+    run_id: Annotated[str | None, Query()] = None,
+    decision: Annotated[Decision | None, Query(description="effective decision")] = None,
+    charge_type: Annotated[ChargeType | None, Query()] = None,
+    rule_id: Annotated[str | None, Query(max_length=64)] = None,
 ) -> dict[str, Any]:
-    """Decisions of one run (default: the newest run), with the effective outcome."""
+    """Decisions of one run (default: the newest run), with the effective outcome.
+
+    Filters narrow `items` only; `counts` (effective decisions) and `facets` always describe
+    the whole run, so the page can show totals and the available filter values."""
     try:
         with org_session(engine, org) as session:
             runs = repo.list_runs(session)
             if not runs:
-                return {"run": None, "items": []}
+                return {"run": None, "counts": {}, "facets": {}, "filters": {}, "items": []}
             run = next((r for r in runs if r.run_id == run_id), None) if run_id else runs[0]
             if run is None:
                 raise HTTPException(status.HTTP_404_NOT_FOUND, f"no run {run_id!r}")
@@ -188,14 +196,33 @@ def list_decisions(
                 items.append(item)
     except SQLAlchemyError as exc:
         raise _unavailable(exc) from None
+    counts = {d.value: sum(1 for i in items if i["decision"] == d.value) for d in Decision}
+    facets = {
+        "charge_type": sorted({i["charge_type"] for i in items}),
+        "rule_id": sorted({i["rule_id"] for i in items}),
+    }
+    shown = [
+        i
+        for i in items
+        if (decision is None or i["decision"] == decision.value)
+        and (charge_type is None or i["charge_type"] == charge_type.value)
+        and (rule_id is None or i["rule_id"] == rule_id)
+    ]
     return {
         "run": {
             "run_id": run.run_id,
             "decided_at": run.decided_at.isoformat(),
             "charges": run.charges,
-            "counts": run.counts,
+            "counts": run.counts,  # the engine's decisions, before any override
         },
-        "items": items,
+        "counts": counts,
+        "facets": facets,
+        "filters": {
+            "decision": decision.value if decision else None,
+            "charge_type": charge_type.value if charge_type else None,
+            "rule_id": rule_id,
+        },
+        "items": shown,
     }
 
 

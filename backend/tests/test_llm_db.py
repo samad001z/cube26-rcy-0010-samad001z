@@ -55,6 +55,7 @@ def _cfg() -> LLMConfig:
         model="fixture-model",
         credentials_file=None,
         timeout_s=5,
+        run_budget_s=200,
         max_output_tokens=256,
         price_input_per_mtok=Decimal("0.10"),
         price_output_per_mtok=Decimal("0.40"),

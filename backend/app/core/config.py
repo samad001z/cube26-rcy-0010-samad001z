@@ -36,6 +36,12 @@ class Settings(BaseSettings):
     # Run service identity is used and this stays unset (DEPLOY.md).
     google_application_credentials: str | None = None
     llm_timeout_s: int = 20
+    # A wall-clock budget for model calls across one run (not one call): sequential calls at
+    # up to LLM_TIMEOUT_S each can otherwise exceed the deploy's own request timeout (e.g.
+    # Cloud Run's 300s) and roll back the whole run, even the pending records (rule 5). Once
+    # spent, remaining charges get the template with no further call. Kept under a typical
+    # 300s deploy timeout, leaving room for the database work around it.
+    llm_run_budget_s: int = 200
     llm_max_output_tokens: int = 1024
     # Operator-supplied prices from the Vertex AI pricing page; no defaults (cost null if unset).
     llm_price_input_usd_per_mtok: Decimal | None = None

@@ -53,6 +53,12 @@ class Explainer:
     # Why the model is not used at all (bad config); None when LLM is simply off.
     unavailable: str | None = None
     calls: int = field(default=0)  # model calls made, for tests and the run summary
+    # A wall-clock deadline (time.monotonic()) for model calls across this run (D-022,
+    # guardian finding 4): once passed, remaining charges get the template with no further
+    # call, so one slow run cannot exceed the deploy's own request timeout and roll back
+    # every charge, including already-decided pending ones (rule 5). None means no budget
+    # (LLM off, or misconfigured).
+    deadline: float | None = None
 
     @classmethod
     def from_settings(cls, s: Settings) -> "Explainer":
@@ -60,7 +66,8 @@ class Explainer:
             return cls()
         try:
             cfg = llm_config(s)
-            return cls(provider=make_provider(cfg), cfg=cfg)
+            deadline = time.monotonic() + cfg.run_budget_s
+            return cls(provider=make_provider(cfg), cfg=cfg, deadline=deadline)
         except (LLMConfigError, LLMError) as exc:
             return cls(unavailable=f"model not configured: {exc}")
 
@@ -134,6 +141,9 @@ class Explainer:
                     )
                 except ExplanationRejected:
                     pass  # validator tightened since it was cached: ask the model again
+
+        if self.deadline is not None and time.monotonic() > self.deadline:
+            return self._template(trace, thash, "time budget exhausted for this run")
 
         self.calls += 1
         try:

@@ -23,6 +23,7 @@ class LLMConfig:
     model: str
     credentials_file: Path | None
     timeout_s: int
+    run_budget_s: int
     max_output_tokens: int
     price_input_per_mtok: Decimal | None
     price_output_per_mtok: Decimal | None
@@ -57,8 +58,10 @@ def llm_config(s: Settings) -> LLMConfig:
             )
         if not creds.is_file():
             raise LLMConfigError(f"GOOGLE_APPLICATION_CREDENTIALS file not found: {creds}")
-    if s.llm_timeout_s < 1 or s.llm_max_output_tokens < 1:
-        raise LLMConfigError("LLM_TIMEOUT_S and LLM_MAX_OUTPUT_TOKENS must be positive")
+    if s.llm_timeout_s < 1 or s.llm_max_output_tokens < 1 or s.llm_run_budget_s < 1:
+        raise LLMConfigError(
+            "LLM_TIMEOUT_S, LLM_RUN_BUDGET_S and LLM_MAX_OUTPUT_TOKENS must be positive"
+        )
     return LLMConfig(
         provider=provider,
         project=str(s.google_cloud_project).strip(),
@@ -66,6 +69,7 @@ def llm_config(s: Settings) -> LLMConfig:
         model=str(s.llm_model).strip(),
         credentials_file=creds,
         timeout_s=s.llm_timeout_s,
+        run_budget_s=s.llm_run_budget_s,
         max_output_tokens=s.llm_max_output_tokens,
         price_input_per_mtok=s.llm_price_input_usd_per_mtok,
         price_output_per_mtok=s.llm_price_output_usd_per_mtok,

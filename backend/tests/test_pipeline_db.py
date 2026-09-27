@@ -233,6 +233,8 @@ def test_engine_failure_on_one_charge_fails_open_and_keeps_every_charge(
     assert failed.rule_id == "R_ENGINE_ERROR" and "RuntimeError: boom" in failed.reason
     assert failed.reason_code is not None and failed.reason_code.value == "ENGINE_ERROR"
     assert failed.verify_hash()
+    # Fail-open records get the template explanation, never sent to the model (D-022).
+    assert failed.explanation is not None and failed.explanation.source == "template"
     assert by_line["SYN-2"].status == RecordStatus.FINAL
     with org_session(app_engine, org) as s:
         assert len(repo.list_decisions(s, result.run_id)) == 2

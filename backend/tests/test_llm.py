@@ -4,6 +4,7 @@ recorded-shape responses, the validator, fallback to the template, cost, and has
 import json
 import os
 import socket
+import time
 from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
@@ -294,6 +295,23 @@ def test_pending_record_is_never_sent_to_the_model():
     out = e.explain(None, d)
     assert e.calls == 0
     assert out.explanation is not None and out.explanation.source == "template"
+
+
+def test_run_budget_exhausted_falls_back_without_calling_the_model():
+    # Guardian finding 4: a per-run time budget, so one slow model cannot exceed the
+    # deploy's own request timeout and roll back the whole run.
+    e = _explainer(_fixture("claim_ok"))
+    e.deadline = time.monotonic() - 1  # already spent
+    out = e.explain(None, _claim())
+    assert e.calls == 0
+    x = out.explanation
+    assert x is not None and x.source == "template"
+    assert x.fallback_reason == "time budget exhausted for this run"
+
+
+def test_run_budget_is_set_from_settings():
+    e = Explainer.from_settings(_enabled(llm_run_budget_s=5))
+    assert e.deadline is not None and e.deadline <= time.monotonic() + 5
 
 
 def test_disabled_explainer_never_calls_and_has_no_fallback_reason():

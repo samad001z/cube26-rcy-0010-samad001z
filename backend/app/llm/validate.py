@@ -6,6 +6,8 @@ Accepted only if:
   - every ID-like token, snake_case name, ISO date and number in it appears in the trace;
   - it writes no date in any other form (so no date can slip past the ISO check);
   - the only decision word in capitals is the record's own decision, and it is there;
+  - it contains no phrasing, in any case, that argues for a different decision (e.g.
+    "you should claim the fee now" on a REVIEW record);
   - it has no link and none of the forbidden phrases (CLAUDE.md).
 """
 
@@ -48,6 +50,48 @@ NUMBER = re.compile(r"\d+(?:\.\d+)?")
 DNC = re.compile(r"\bDO[ _]NOT[ _]CLAIM\b")
 CLAIM = re.compile(r"\bCLAIM\b")
 REVIEW = re.compile(r"\bREVIEW\b")
+
+# Case-insensitive phrasing that argues for a decision, however it is cased: "You should
+# claim the fee now" on a REVIEW record, or "do not claim this yet" on a CLAIM record. The
+# capitalised checks above only catch the record's own decision word; these catch the model
+# arguing for a different one in lower case, which the capitals check never sees.
+_DNC_SIGNAL = re.compile(
+    r"\bdo\s*n[o']?t\s+claim\b"
+    r"|\bshould\s+not\s+(?:be\s+)?claim(?:ed)?\b"
+    r"|\b(?:cannot|can't)\s+be\s+claim(?:ed)?\b"
+    r"|\bnot\s+(?:yet\s+)?claim(?:able|ed)?\b",
+    re.IGNORECASE,
+)
+_CLAIM_SIGNAL = re.compile(
+    r"\bshould\s+(?:be\s+)?claim(?:ed)?\b"
+    r"|\bcan\s+be\s+claim(?:ed)?\b"
+    r"|\beligible\s+to\s+claim\b"
+    r"|\brecommend(?:s|ed)?\s+claim(?:ing)?\b"
+    r"|\bclaim\s+(?:the|this|it)\b"
+    r"|\bfile\s+(?:a|the)\s+claim\b(?!\s+outside)",
+    re.IGNORECASE,
+)
+_REVIEW_SIGNAL = re.compile(
+    r"\bneeds?\s+(?:further\s+)?review\b"
+    r"|\bshould\s+be\s+reviewed\b"
+    r"|\bsend\s+(?:it|this)?\s*for\s+review\b"
+    r"|\bunder\s+review\b",
+    re.IGNORECASE,
+)
+
+
+def _decision_signals(text: str) -> set[str]:
+    found: set[str] = set()
+    rest = text
+    if _DNC_SIGNAL.search(rest):
+        found.add("DO_NOT_CLAIM")
+        rest = _DNC_SIGNAL.sub(" ", rest)
+    if _CLAIM_SIGNAL.search(rest):
+        found.add("CLAIM")
+        rest = _CLAIM_SIGNAL.sub(" ", rest)
+    if _REVIEW_SIGNAL.search(rest):
+        found.add("REVIEW")
+    return found
 
 
 class ExplanationRejected(ValueError):
@@ -95,6 +139,12 @@ def validate_explanation(raw: str, trace: dict[str, Any]) -> str:
         found = sorted(words) or "none"
         raise ExplanationRejected(
             f"decision words {found} do not match the decision {trace['decision']}"
+        )
+
+    other_signals = _decision_signals(text) - {trace["decision"]}
+    if other_signals:
+        raise ExplanationRejected(
+            f"wording argues for {sorted(other_signals)}, not the decision {trace['decision']}"
         )
 
     source = corpus(trace)

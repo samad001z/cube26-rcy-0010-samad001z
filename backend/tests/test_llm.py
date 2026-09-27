@@ -407,6 +407,26 @@ def test_lower_case_id_matching_the_real_one_is_accepted():
     assert "demo-f01-1" in validate_explanation(_model_json(text), trace)
 
 
+def test_lower_case_wording_arguing_for_a_different_decision_is_rejected():
+    # Guardian finding 2: the capitals-only check missed a REVIEW record whose text argues,
+    # in lower case, that the charge should be claimed.
+    d = _claim().model_copy(update={"decision": Decision.REVIEW, "claim": None})
+    tr = build_trace(d)
+    text = (
+        "REVIEW. Prep record PRP-1 was read for L-1 before the fee was posted. You should "
+        "claim the fee now."
+    )
+    with pytest.raises(ExplanationRejected, match=r"wording argues for .*CLAIM"):
+        validate_explanation(_model_json(text), tr)
+
+
+def test_lower_case_do_not_claim_wording_on_a_claim_record_is_rejected():
+    tr = build_trace(_claim())
+    text = GOOD + " Actually, do not claim this yet."
+    with pytest.raises(ExplanationRejected, match=r"wording argues for .*DO_NOT_CLAIM"):
+        validate_explanation(_model_json(text), tr)
+
+
 def test_template_uses_only_trace_facts():
     tr = build_trace(_claim())
     text = template_text(tr)

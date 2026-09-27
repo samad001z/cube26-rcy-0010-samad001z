@@ -7,6 +7,7 @@ from datetime import UTC, date, datetime
 import pytest
 import sqlalchemy as sa
 from sqlalchemy import Engine, text
+from sqlalchemy.orm import Session
 from typer.testing import CliRunner
 
 from app import cli, pipeline
@@ -19,6 +20,7 @@ from app.db import repo
 from app.db import tables as t
 from app.db.session import org_session
 from app.engine import decide as engine_decide
+from app.llm.explain import Explainer
 from app.models.charge import SourceRef
 from app.models.decision import DecisionRecord
 from app.models.vocab import Decision, RecordStatus
@@ -242,6 +244,27 @@ def test_engine_failure_on_one_charge_fails_open_and_keeps_every_charge(
     kinds = [e.event_type for e in events]
     assert kinds.count("DECISION") == 2 and kinds.count("DECISION_FAILED_OPEN") == 1
     assert "RUN_STARTED" in kinds and "RUN_COMPLETED" in kinds
+
+
+def test_explanation_failing_on_the_fail_open_path_does_not_lose_the_charge(
+    app_engine, loaded, monkeypatch
+):
+    # Guardian finding 12: pipeline.run_org's fail-open branch called explainer.explain()
+    # a second time with no guard of its own; if that also raised, the exception was
+    # uncaught and could abort the rest of the run.
+    org = "org_test_failopen_explain"
+    _load_synthetic(app_engine, org)
+
+    class AlwaysBroken(Explainer):
+        def explain(self, session: Session | None, d: DecisionRecord) -> DecisionRecord:
+            raise RuntimeError("explanation always fails")
+
+    result = run_org(app_engine, org, AS_OF, explainer=AlwaysBroken())
+    assert {d.subject.line_id for d in result.decisions} == {"SYN-1", "SYN-2"}
+    for d in result.decisions:
+        assert d.status == RecordStatus.PENDING and d.explanation is None
+        assert "explanation always fails" in d.reason
+        assert d.verify_hash()
 
 
 def _forged_row(d: DecisionRecord, decision: str, amount: str | None) -> dict[str, object]:

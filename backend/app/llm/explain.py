@@ -31,6 +31,8 @@ COST_QUANTUM = Decimal("0.000001")
 PRICE_NOT_CONFIGURED = (
     "price not configured (LLM_PRICE_INPUT_USD_PER_MTOK, LLM_PRICE_OUTPUT_USD_PER_MTOK)"
 )
+# A fixed string, built from nothing: the last-resort fallback when even the template fails.
+CONSTANT_FALLBACK = "Explanation unavailable. See the decision's own reason and evidence."
 
 
 def estimate_cost(
@@ -186,12 +188,27 @@ class Explainer:
         try:
             e = self.explanation_for(session, d)
         except Exception as exc:  # an explanation must never cost a decision
-            trace = build_trace(d)
-            e = self._template(
-                trace,
-                trace_hash(trace, PROMPT_VERSION, None),
-                f"explanation step failed: {type(exc).__name__}: {exc}",
-            )
+            try:
+                trace = build_trace(d)
+                e = self._template(
+                    trace,
+                    trace_hash(trace, PROMPT_VERSION, None),
+                    f"explanation step failed: {type(exc).__name__}: {exc}",
+                )
+            except Exception as inner:  # guardian finding 12: this fallback must not fail
+                # either, or a fail-open record (already an error case) could raise again,
+                # uncaught, and abort the rest of the run (pipeline.run_org has no guard
+                # around this call). CONSTANT_FALLBACK derives nothing from `d` or the trace.
+                e = Explanation(
+                    text=CONSTANT_FALLBACK,
+                    source="template",
+                    prompt_version=PROMPT_VERSION,
+                    trace_hash="",
+                    fallback_reason=(
+                        f"explanation step failed twice: {type(exc).__name__}: {exc}; "
+                        f"then {type(inner).__name__}: {inner}"
+                    ),
+                )
         update: dict[str, object] = {"explanation": e}
         if e.source == "model":
             update["model_version"] = e.model_id

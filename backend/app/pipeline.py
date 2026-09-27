@@ -7,6 +7,7 @@ the reason and in the audit log. Everything runs inside one org-scoped session, 
 security applies to every read and write.
 """
 
+import contextlib
 import time
 import uuid
 from collections import defaultdict
@@ -235,7 +236,10 @@ def run_org(
                 d = fail_open_decision(
                     charge, exc, run_id=run_id, decided_at=decided_at, rules=rules, cfg=cfg
                 )
-                d = explainer.explain(None, d)  # pending: the template, no model, no DB
+                # guardian finding 12: never lose a fail-open record to a second failure here;
+                # on any exception `d` keeps fail_open_decision's own reason, unexplained.
+                with contextlib.suppress(Exception):
+                    d = explainer.explain(None, d)  # pending: the template, no model, no DB
                 with session.begin_nested():
                     repo.insert_decision(session, d)
                 repo.add_audit_event(

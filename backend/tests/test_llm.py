@@ -21,7 +21,7 @@ from app.core.hashing import content_hash
 from app.llm import vertex
 from app.llm.client import LLMError, LLMRequest, LLMResponse
 from app.llm.config import LLMConfig, LLMConfigError, llm_config
-from app.llm.explain import PRICE_NOT_CONFIGURED, Explainer, estimate_cost
+from app.llm.explain import CONSTANT_FALLBACK, PRICE_NOT_CONFIGURED, Explainer, estimate_cost
 from app.llm.prompt import PROMPT_VERSION, build_request
 from app.llm.template import template_text
 from app.llm.trace import build_trace, corpus, trace_hash
@@ -335,6 +335,22 @@ def test_run_budget_exhausted_falls_back_without_calling_the_model():
 def test_run_budget_is_set_from_settings():
     e = Explainer.from_settings(_enabled(llm_run_budget_s=5))
     assert e.deadline is not None and e.deadline <= time.monotonic() + 5
+
+
+def test_double_failure_falls_back_to_a_constant_that_cannot_fail(monkeypatch):
+    # Guardian finding 12: the fallback branch itself called build_trace() and _template()
+    # unguarded, so if either of those failed too (not just the model), explain() raised,
+    # which pipeline.run_org's fail-open path does not catch on its own second call.
+    def boom(d: object) -> None:
+        raise RuntimeError("trace boom")
+
+    monkeypatch.setattr("app.llm.explain.build_trace", boom)
+    out = Explainer().explain(None, _claim())
+    assert out.explanation is not None
+    assert out.explanation.text == CONSTANT_FALLBACK
+    assert out.explanation.source == "template"
+    assert "failed twice" in (out.explanation.fallback_reason or "")
+    assert "trace boom" in (out.explanation.fallback_reason or "")
 
 
 def test_disabled_explainer_never_calls_and_has_no_fallback_reason():

@@ -181,33 +181,54 @@ decide -> validate citations -> explain -> hash -> store
                                    |
          LLM_ENABLED=false, pending record, bad config ---------------> template
          cache hit (org, trace hash) -> validate again ---------------> model text (cached)
+         run's time budget already spent (LLM_RUN_BUDGET_S) -----------> template
          one call to Gemini on Vertex AI -> validate against trace --> model text
                                    | any failure -----------------------> template + fallback_reason
+                                   | template itself fails too -----------> CONSTANT_FALLBACK
 ```
 
 - **Trace** (`app/llm/trace.py`): line, unit, charge type, decision, evidence status, rule,
   reason, next action, warnings, amounts, claim computation, routing confidence, coverage,
   checks, citations and the records read. Run-specific IDs are left out so re-runs hit the
-  cache.
+  cache. The prompt (`app/llm/prompt.py`) wraps the trace JSON in `<trace>...</trace>` and
+  tells the model that content inside those tags is data, not instructions, since it embeds
+  report-supplied strings (reasons, operator labels) that other people typed (D-022
+  amendment, 2026-09-27).
 - **Provider** (`app/llm/client.py`, `app/llm/vertex.py`): `google-genai` with
   `vertexai=True`; project, location and model from the environment; temperature 0; JSON
   output with one `explanation` field; one attempt with a timeout; no tools. Only Vertex is
   implemented.
+- **Time budget** (`app/llm/explain.py`, D-022 amendment): `LLM_RUN_BUDGET_S` (default 200s)
+  is a wall-clock deadline for model calls across one run, set when the explainer is built.
+  Once passed, remaining charges in the run get the template with no further call, so one
+  slow model cannot exceed the deploy's own request timeout (e.g. Cloud Run's 300s) and roll
+  back the whole run, including already-decided pending records (rule 5). Cache hits are
+  unaffected (checked before the deadline).
 - **Validation** (`app/llm/validate.py`): every ID, snake_case name, ISO date and number in
-  the text must be in the trace; no date in another form; the decision word in capitals must
-  be the record's own and no other; no link; no forbidden phrase. It does not check the
-  meaning of the wording between those facts.
+  the text must be in the trace, matched as whole tokens (not substrings) and case-
+  insensitively for IDs; no date in another form; the decision word in capitals must be the
+  record's own and no other; no phrasing, in any case, that argues for a different decision
+  ("you should claim the fee now" on a REVIEW record); no currency symbol, no currency code
+  other than the trace's own, no percentage, no number word ("twice", "half", ...), no
+  negative number, and the figure nearest the word "claim" must be the claim amount itself;
+  no link; no forbidden phrase (D-022 amendment, 2026-09-27, guardian findings 1, 2, 6). It
+  does not check the meaning of the wording between those facts.
 - **Template** (`app/llm/template.py`): the decision, the engine's reason, the claim amount,
   the cited records and the next action, assembled by code. It is what the UI labels
-  "Standard explanation".
+  "Standard explanation". If even this fails, `explain()` falls back to `CONSTANT_FALLBACK`,
+  a fixed string derived from nothing, so an explanation failure can never itself lose a
+  fail-open record (D-022 amendment, guardian finding 12).
 - **Recorded**: source, model id, prompt version, trace hash, cached, latency, input and
   output tokens (thinking included), cost estimate from operator prices, fallback reason.
   The explanation is inside the content hash; an empty one is left out so older records
-  still verify.
-- **Cache**: `llm_explanations`, forced RLS, append-only for the app role.
+  still verify. An overridden record (D-021) gets its own explanation, naming the reviewer
+  and their reason, not the engine's; `model_version` is cleared, since a human override is
+  never a model output (D-022 amendment, guardian finding 5).
+- **Cache**: `llm_explanations`, forced RLS, append-only for the app role. A cache hit is
+  re-validated against the current trace before use, not trusted blindly, so a validator
+  tightened since the row was cached still applies.
 - **Cost and latency**: one call per non-pending decision on the first run of a trace,
-  none on a re-run. Calls are made one after another, so a run with the model on takes
-  roughly the model latency times the number of new traces.
+  none on a re-run, until the run's time budget is spent. Calls are made one after another.
 - `make llm-smoke` sends one real trace and prints the explanation, latency, tokens and
   cost, or says that it fell back and why.
 

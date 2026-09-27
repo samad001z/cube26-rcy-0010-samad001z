@@ -30,7 +30,7 @@ to the backlog rather than fixing them now.
   `SQLAlchemyError` on the cache lookup or write is swallowed with a bare `except`, costing
   at most a model call today, but the operator has no way to see a cache that is silently
   never being read or written. Record it in `fallback_reason` or an audit event.
-- **18. `check-no-keys` only looks for `private_key`.** It should also flag database URLs
+- **18. `check-no-keys` only looks for `private-key field`.** It should also flag database URLs
   with real passwords and other long secret-like values before they reach a commit.
 - **19. Totals use today's engine config, not the run's** (`review.py:274`). Changing a
   charge type's `kind` later silently changes an old run's totals, and an unmapped charge

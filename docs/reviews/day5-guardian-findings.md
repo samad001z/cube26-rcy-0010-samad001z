@@ -27,7 +27,7 @@ Source: rules-guardian and test-guardian review in the cloud session, 2026-09-27
 15. *(no separate item; numbering kept from the review)*
 16. **Prompt doesn't mark the trace as data** (prompt.py). Report-supplied strings could carry instructions. Wrap the trace in tags and tell the model to ignore instructions inside them.
 17. **Passwords on command lines** (DEPLOY.md:40, supabase.sql, bin/check-db). They land in shell history and the process list. Use .pgpass, PGPASSWORD from the environment, or pre-hashed SCRAM passwords.
-18. check-no-keys only looks for private_key. Add database URLs with real passwords and long secret-like values.
+18. check-no-keys only looks for private-key field. Add database URLs with real passwords and long secret-like values.
 19. Totals use today's engine config (review.py:274): changing a charge type's kind later silently changes old runs' totals, and an unknown type returns 500. Also untested small settings: timeout <= 0 accepted, provider name case-sensitive, automatic function calling re-enabled.
 
 ## Confirmed fine by the reviewers

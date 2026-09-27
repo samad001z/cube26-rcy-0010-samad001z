@@ -102,6 +102,19 @@ def _model_json(text: str) -> str:
 # -- settings ---------------------------------------------------------------------------
 
 
+def test_empty_values_as_in_env_example_mean_unset(monkeypatch):
+    for name in (
+        "LLM_PROVIDER",
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        "LLM_PRICE_INPUT_USD_PER_MTOK",
+        "LLM_PRICE_OUTPUT_USD_PER_MTOK",
+    ):
+        monkeypatch.setenv(name, "")
+    s = _settings()
+    assert s.llm_provider is None and s.google_application_credentials is None
+    assert s.llm_price_input_usd_per_mtok is None and s.llm_price_output_usd_per_mtok is None
+
+
 def test_disabled_by_default_makes_no_provider():
     e = Explainer.from_settings(_settings())
     assert e.provider is None and e.unavailable is None

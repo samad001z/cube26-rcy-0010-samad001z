@@ -12,3 +12,8 @@ venv/
 .pytest_cache/
 .hypothesis/
 demo/.last_run.json
+
+# Credentials never enter the repo (DEPLOY.md). Keep key files outside it, e.g. ~/.config/alibi/.
+*service-account*.json
+*credentials*.json
+.secrets/

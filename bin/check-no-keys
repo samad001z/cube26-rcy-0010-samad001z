@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Fails if any tracked file contains a private key field, the mark of a service-account
+# key file (make check-keys; a CI step). The word is assembled here so this script does
+# not match itself.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+needle="private""_key"
+if hits="$(git grep -I -l -i -e "$needle" -- .)"; then
+  echo "check-no-keys: these tracked files contain '$needle' (a credential must never be committed):" >&2
+  echo "$hits" | sed 's/^/  /' >&2
+  exit 1
+fi
+echo "check-no-keys: no tracked file contains '$needle'"

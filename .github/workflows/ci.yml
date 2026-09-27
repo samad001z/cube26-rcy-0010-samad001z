@@ -29,6 +29,8 @@ jobs:
       ATTACHMENT_KEY_SECRET: ci-attachment-secret
     steps:
       - uses: actions/checkout@v4
+      - name: No credentials in the repository
+        run: bin/check-no-keys
       - uses: astral-sh/setup-uv@v5
       - name: Create roles and databases
         run: bash docker/postgres/init.sh

@@ -5,7 +5,7 @@ from decimal import Decimal
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import SecretStr, ValidationError
+from pydantic import SecretStr, ValidationError, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -43,6 +43,21 @@ class Settings(BaseSettings):
     # API keys for POST /agent: `org_id:sha256hex,...` (hashes only; see app/api/auth.py).
     # Empty means no key is valid, so POST /agent answers 401 to everyone.
     alibi_api_keys: str = ""
+
+    @field_validator(
+        "llm_provider",
+        "google_cloud_project",
+        "google_cloud_location",
+        "llm_model",
+        "google_application_credentials",
+        "llm_price_input_usd_per_mtok",
+        "llm_price_output_usd_per_mtok",
+        mode="before",
+    )
+    @classmethod
+    def _empty_is_unset(cls, v: object) -> object:
+        """`NAME=` in .env (as .env.example has it) means not set."""
+        return None if isinstance(v, str) and not v.strip() else v
 
 
 def _one_line(exc: ValidationError) -> str:

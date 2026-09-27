@@ -6,9 +6,6 @@ import { redirect } from "next/navigation";
 // The API key lives only in an httpOnly cookie and is sent to the backend from the server.
 // Browser JavaScript never sees it.
 export const KEY_COOKIE = "alibi_key";
-// The organisation the key belongs to, for the top bar only. No endpoint returns it yet
-// (backlog: GET /me), so it is read from a decision record at sign-in or after a run.
-export const ORG_COOKIE = "alibi_org";
 export const COOKIE_MAX_AGE = 60 * 60 * 8;
 
 export function backendUrl(): string {
@@ -43,10 +40,6 @@ export async function currentKey(): Promise<string | undefined> {
   return (await cookies()).get(KEY_COOKIE)?.value;
 }
 
-export async function currentOrg(): Promise<string | undefined> {
-  return (await cookies()).get(ORG_COOKIE)?.value;
-}
-
 /** Call the backend with an explicit key. Throws BackendError on a non-2xx answer. */
 export async function callBackend<T>(key: string, path: string, init: RequestInit = {}): Promise<T> {
   let res: Response;
@@ -75,21 +68,3 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
 }
 
-/**
- * The organisation of `key`, read from its newest decision record; undefined when the
- * organisation has no run yet. Workaround until the backend has GET /me.
- */
-export async function discoverOrg(key: string): Promise<string | undefined> {
-  try {
-    const list = await callBackend<{ items: { record_id: string }[] }>(key, "/decisions");
-    const first = list.items[0];
-    if (!first) return undefined;
-    const d = await callBackend<{ record: { organization_id: string } }>(
-      key,
-      `/decisions/${encodeURIComponent(first.record_id)}`,
-    );
-    return d.record.organization_id;
-  } catch {
-    return undefined;
-  }
-}

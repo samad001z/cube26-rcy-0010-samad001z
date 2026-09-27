@@ -4,6 +4,9 @@ Work agreed but not scheduled. Newest phase first.
 
 ## Phase 2
 
+Both items were built on `day5` (2026-09-27): `totals` on `GET /decisions` shown in the KPI
+tiles, and `GET /me` in the top bar; the sign-in workaround is removed.
+
 Added 2026-09-27 by the human lead, during the Day 4 UI polish (`day4-polish`).
 
 - **Per-decision totals from `GET /decisions`.** Return, for the whole run and per effective

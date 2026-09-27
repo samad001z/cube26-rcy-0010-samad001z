@@ -9,7 +9,9 @@ The reviewer name on an override is supplied by the caller. The API key identifi
 organisation, not a person, so the name is recorded as given (limitation, README).
 """
 
+from collections import defaultdict
 from datetime import UTC, date, datetime
+from decimal import Decimal
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -76,6 +78,37 @@ def _summary(
         "override_count": len(overrides),
         "integrity_problems": problems,
         "reason": eff.reason,
+    }
+
+
+def _totals(items: list[dict[str, Any]], cfg: EngineConfig) -> dict[str, Any]:
+    """Money per effective decision and for the whole run, summed here with Decimal so the UI
+    never adds amounts. Per currency. `fees_charged` counts fee lines only: on a refund line or
+    a loss event the amount is money paid to the seller (D-011), not a charge. `claimable` is
+    the sum of the effective claim amounts (engine or human CLAIM)."""
+
+    def empty() -> dict[str, Any]:
+        return {"count": 0, "fees_charged": defaultdict(Decimal), "claimable": defaultdict(Decimal)}
+
+    groups: dict[str, dict[str, Any]] = {"ALL": empty(), **{d.value: empty() for d in Decision}}
+    for i in items:
+        is_fee = cfg.charge_types[ChargeType(i["charge_type"])].kind == "fee"
+        refund_line = i["report_type"] == "reimbursement_report"
+        charged = Decimal(i["amount_charged"]) if is_fee and not refund_line else None
+        for key in ("ALL", i["decision"]):
+            g = groups[key]
+            g["count"] += 1
+            if charged is not None:
+                g["fees_charged"][i["currency"]] += charged
+            if i["claim_amount"] is not None:
+                g["claimable"][i["currency"]] += Decimal(i["claim_amount"])
+    return {
+        key: {
+            "count": g["count"],
+            "fees_charged": {c: str(v) for c, v in sorted(g["fees_charged"].items())},
+            "claimable": {c: str(v) for c, v in sorted(g["claimable"].items())},
+        }
+        for key, g in groups.items()
     }
 
 
@@ -172,6 +205,12 @@ def _deadline(
     }
 
 
+@router.get("/me")
+def me(org: Org) -> dict[str, str]:
+    """The organisation the API key belongs to. Nothing else about the key is returned."""
+    return {"organization_id": org}
+
+
 @router.get("/runs")
 def list_runs(org: Org, engine: Db) -> list[dict[str, Any]]:
     try:
@@ -201,13 +240,20 @@ def list_decisions(
 ) -> dict[str, Any]:
     """Decisions of one run (default: the newest run), with the effective outcome.
 
-    Filters narrow `items` only; `counts` (effective decisions) and `facets` always describe
-    the whole run, so the page can show totals and the available filter values."""
+    Filters narrow `items` only; `counts`, `totals` (Decimal sums as strings, per effective
+    decision and `ALL`) and `facets` always describe the whole run."""
     try:
         with org_session(engine, org) as session:
             runs = repo.list_runs(session)
             if not runs:
-                return {"run": None, "counts": {}, "facets": {}, "filters": {}, "items": []}
+                return {
+                    "run": None,
+                    "counts": {},
+                    "totals": {},
+                    "facets": {},
+                    "filters": {},
+                    "items": [],
+                }
             run = next((r for r in runs if r.run_id == run_id), None) if run_id else runs[0]
             if run is None:
                 raise HTTPException(status.HTTP_404_NOT_FOUND, f"no run {run_id!r}")
@@ -225,6 +271,7 @@ def list_decisions(
     except SQLAlchemyError as exc:
         raise _unavailable(exc) from None
     counts = {d.value: sum(1 for i in items if i["decision"] == d.value) for d in Decision}
+    totals = _totals(items, load_engine_config())
     facets = {
         "charge_type": sorted({i["charge_type"] for i in items}),
         "rule_id": sorted({i["rule_id"] for i in items}),
@@ -244,6 +291,7 @@ def list_decisions(
             "counts": run.counts,  # the engine's decisions, before any override
         },
         "counts": counts,
+        "totals": totals,
         "facets": facets,
         "filters": {
             "decision": decision.value if decision else None,

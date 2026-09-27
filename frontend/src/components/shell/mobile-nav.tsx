@@ -8,7 +8,7 @@ import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 
 import { Nav } from "./nav";
 
-export function MobileNav() {
+export function MobileNav({ org }: { org?: string }) {
   const [open, setOpen] = useState(false);
   return (
     <Sheet open={open} onOpenChange={setOpen}>
@@ -18,7 +18,7 @@ export function MobileNav() {
           <span className="sr-only">Open navigation</span>
         </Button>
       </SheetTrigger>
-      <SheetContent side="left" title="Alibi" description="Recovery Manager">
+      <SheetContent side="left" title="Alibi" description={org ? `Recovery Manager · ${org}` : "Recovery Manager"}>
         <div className="p-3">
           <Nav onNavigate={() => setOpen(false)} />
         </div>

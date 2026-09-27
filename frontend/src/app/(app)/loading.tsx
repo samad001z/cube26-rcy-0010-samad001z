@@ -8,9 +8,9 @@ export default function Loading() {
         <Skeleton className="h-7 w-40" />
         <Skeleton className="h-5 w-72" />
       </div>
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2 lg:grid-cols-4">
         {Array.from({ length: 4 }, (_, i) => (
-          <Skeleton key={i} className="h-[104px] rounded-lg" />
+          <Skeleton key={i} className="h-[172px] rounded-lg" />
         ))}
       </div>
       <div className="flex flex-col gap-2 lg:flex-row">

@@ -20,24 +20,24 @@ Or from the repo root: `make review-ui` (API and UI together, dev-only keys).
 
 - Sign-in takes the organisation's API key, checks it against `GET /runs`, and stores it in an
   httpOnly, SameSite=Strict cookie for 8 hours. Page scripts cannot read it.
-- The organisation name in the top bar comes from a second httpOnly cookie. No endpoint
-  returns it yet, so it is read at sign-in from the newest decision record, and refreshed from
-  the `X-Alibi-Organization` header after a run. An organisation with no run shows "Signed in".
-  Backlog: `GET /me` (docs/BACKLOG.md).
+- The organisation name in the top bar comes from `GET /me`.
 - Pages are server components that call the backend from the server with that key.
 - Overrides are a server action calling `POST /decisions/{id}/overrides`.
 - New runs upload through `/api/run`, a route handler that forwards to `POST /agent`.
   **Load demo data** posts to `/api/run/demo`, which reads `../demo/` (or `ALIBI_DEMO_DIR`) on
   the server and forwards it the same way.
 - Nothing is decided in the UI. It only displays what the backend returns. Money and
-  confidence are strings from the server and are never computed on here; the KPI tiles show
-  counts only. Sorting the money columns compares the decimal strings, it adds nothing up.
+  confidence are strings from the server and are never computed on here: the KPI tiles show
+  the backend's `totals` (Decimal sums per effective decision). Sorting the money columns
+  compares the decimal strings, it adds nothing up.
 
 ## Pages
 
 - `/login`: key field with show/hide, error state, a note on how the key is stored.
 - `/` decisions of the newest run (or `?run=`, also chosen in the top bar).
-  - KPI tiles: all charges, CLAIM, DO NOT CLAIM, REVIEW, counts of equal weight; a tile filters.
+  - KPI tiles: all charges, CLAIM, DO NOT CLAIM, REVIEW, of equal weight; a tile filters.
+    Each shows the count, the fees charged (fee lines only: a refund line or a loss event
+    is money paid to the seller) and the claimable amount, as summed by the backend.
   - Table: sortable columns, sticky header, filters for decision, charge type and rule (in the
     URL, applied by the backend), search by line or unit ID, 25 rows a page, a row opens the
     detail. Below 1024px the rows become cards, so nothing scrolls sideways.
@@ -49,8 +49,10 @@ Or from the repo root: `make review-ui` (API and UI together, dev-only keys).
 - `/decisions/[id]`
   - Header: line, decision, charge summary, charged and claim amounts, routing confidence with
     a tooltip on what it measures, and the **Override decision** button.
-  - Why: the headline and the next action. The engine's full reason, rule, rule path,
-    evidence status and reason code are under **Technical detail**.
+  - Why: the headline, the explanation (labelled "Written by <model>, checked against this
+    decision's evidence" or "Standard explanation", D-022) and the next action. The engine's
+    full reason, rule, rule path, evidence status, reason code and the explanation's model,
+    tokens, cost and any fallback reason are under **Technical detail**.
   - Recovery checks with PASS / FAIL / UNCERTAIN icons and plain-English names.
   - Evidence as a timeline: records in time order around the posting date, each pod's custody
     window drawn as a shaded rail, records cited by the decision solid, records read but not

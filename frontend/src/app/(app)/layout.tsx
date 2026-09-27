@@ -9,19 +9,21 @@ import { MobileNav } from "@/components/shell/mobile-nav";
 import { Nav } from "@/components/shell/nav";
 import { RunSwitcher } from "@/components/shell/run-switcher";
 import { Button } from "@/components/ui/button";
-import { api, currentKey, currentOrg } from "@/lib/api";
+import { api, currentKey } from "@/lib/api";
 import type { Run } from "@/lib/types";
 
 export default async function AppLayout({ children }: LayoutProps<"/">) {
   if (!(await currentKey())) redirect("/login");
   let runs: Run[] = [];
+  let org: string | undefined;
   try {
-    runs = await api<Run[]>("/runs");
+    const [r, me] = await Promise.all([api<Run[]>("/runs"), api<{ organization_id: string }>("/me")]);
+    runs = r;
+    org = me.organization_id;
   } catch (err) {
     unstable_rethrow(err); // a rejected key redirects to the login page
     // Backend down: the page itself shows the error; the shell still renders.
   }
-  const org = await currentOrg();
 
   return (
     <div className="min-h-dvh lg:grid lg:grid-cols-[232px_minmax(0,1fr)]">
@@ -46,7 +48,7 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
 
       <div className="flex min-w-0 flex-col">
         <header className="sticky top-0 z-30 flex h-14 items-center gap-2 border-b border-border bg-surface px-4 sm:gap-3 sm:px-6">
-          <MobileNav />
+          <MobileNav org={org} />
           <Link href="/" className="lg:hidden" aria-label="Alibi, decisions">
             <Brand subtitle={false} />
           </Link>
@@ -61,7 +63,7 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
               title="Organisation of the API key you signed in with"
             >
               <Building2 className="size-4" aria-hidden />
-              {org ? <span className="font-mono text-xs text-foreground">{org}</span> : "Signed in"}
+              {org ? <span className="font-mono text-xs text-foreground">{org}</span> : "Organisation unavailable"}
             </span>
             <form action={logout}>
               <Button variant="subtle" size="sm" type="submit">

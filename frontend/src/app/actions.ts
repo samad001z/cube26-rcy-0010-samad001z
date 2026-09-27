@@ -4,15 +4,7 @@ import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
-import {
-  BackendError,
-  COOKIE_MAX_AGE,
-  KEY_COOKIE,
-  ORG_COOKIE,
-  callBackend,
-  currentKey,
-  discoverOrg,
-} from "@/lib/api";
+import { BackendError, COOKIE_MAX_AGE, KEY_COOKIE, callBackend, currentKey } from "@/lib/api";
 
 export interface FormState {
   error: string | null;
@@ -31,25 +23,18 @@ export async function login(_prev: FormState, form: FormData): Promise<FormState
     }
     return { error: err instanceof Error ? err.message : "The backend could not be reached." };
   }
-  const jar = await cookies();
-  const options = {
+  (await cookies()).set(KEY_COOKIE, key, {
     httpOnly: true,
     sameSite: "strict",
     secure: process.env.NODE_ENV === "production",
     path: "/",
     maxAge: COOKIE_MAX_AGE,
-  } as const;
-  jar.set(KEY_COOKIE, key, options);
-  const org = await discoverOrg(key);
-  if (org) jar.set(ORG_COOKIE, org, options);
-  else jar.delete(ORG_COOKIE);
+  });
   redirect("/");
 }
 
 export async function logout(): Promise<void> {
-  const jar = await cookies();
-  jar.delete(KEY_COOKIE);
-  jar.delete(ORG_COOKIE);
+  (await cookies()).delete(KEY_COOKIE);
   redirect("/login");
 }
 

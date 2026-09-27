@@ -109,7 +109,7 @@ export default async function DecisionsPage({ searchParams }: PageProps<"/">) {
         </Notice>
       )}
 
-      <KpiTiles total={run.charges} counts={data.counts} active={show} params={{ run: runParam, type: typeParam, rule: ruleParam }} />
+      <KpiTiles totals={data.totals} active={show} params={{ run: runParam, type: typeParam, rule: ruleParam }} />
 
       {data.items.some((i) => i.integrity_problems.length > 0) && (
         <Notice tone="error" title="Some stored history does not verify">

@@ -12,10 +12,20 @@ export interface Run {
   counts: Partial<Record<DecisionValue, number>>;
 }
 
-/** GET /decisions. `counts` and `facets` describe the whole run; filters narrow `items`. */
+/** Decimal sums from the backend, as strings, keyed by currency. Never added up in the UI. */
+export interface Total {
+  count: number;
+  /** Fee lines only: refund lines and loss events are money paid to the seller. */
+  fees_charged: Record<string, string>;
+  /** Effective claim amounts (engine or human CLAIM). */
+  claimable: Record<string, string>;
+}
+
+/** GET /decisions. `counts`, `totals` and `facets` describe the whole run; filters narrow `items`. */
 export interface DecisionList {
   run: Run | null;
   counts: Partial<Record<DecisionValue, number>>;
+  totals: Partial<Record<DecisionValue | "ALL", Total>>;
   facets: { charge_type?: string[]; rule_id?: string[] };
   filters: { decision?: DecisionValue | null; charge_type?: string | null; rule_id?: string | null };
   items: DecisionSummary[];

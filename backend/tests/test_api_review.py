@@ -20,7 +20,7 @@ from app.main import app
 from app.models.charge import Charge, SourceRef
 from app.models.contract import EvidenceRecord
 from app.models.decision import DecisionRecord
-from app.models.vocab import ChargeType
+from app.models.vocab import ChargeType, ReportType
 from app.pipeline import run_org
 from tests.conftest import ALPHA, AS_OF, BRAVO
 from tests.factories import charge, prep_all_pass
@@ -29,7 +29,7 @@ from tests.test_overrides import _setup
 ALPHA_KEY, BRAVO_KEY = "alpha-review-key-000000000", "bravo-review-key-111111111"
 # One synthetic org per tampering test, so no test sees another's edits.
 _RUN = uuid.uuid4().hex[:8]
-SYN_ORGS = {f"org_test_api_rev_{_RUN}_{n}": f"synthetic-review-key-{n}-{_RUN}" for n in range(8)}
+SYN_ORGS = {f"org_test_api_rev_{_RUN}_{n}": f"synthetic-review-key-{n}-{_RUN}" for n in range(10)}
 
 
 def _keys() -> dict[str, str]:
@@ -70,6 +70,7 @@ def _latest(engine: Engine, org: str) -> list[DecisionRecord]:
 @pytest.mark.parametrize(
     "method, path",
     [
+        ("get", "/me"),
         ("get", "/runs"),
         ("get", "/decisions"),
         ("get", "/decisions/DEC-x"),
@@ -620,3 +621,78 @@ def test_charge_changed_since_the_decision_withholds_window_and_deadline(client,
     assert body["deadline"]["status"] == "unknown"
     assert body["deadline"]["at_decision"]["detail"] == d.check("within_filing_window").detail
     assert [e["custody_window"] for e in body["evidence"]] == [None]
+
+
+# --- GET /me and totals (docs/BACKLOG.md, Phase 2) ---------------------------------------
+
+
+def test_me_names_the_callers_organisation_only(client):
+    assert client.get("/me", headers=_h(ALPHA_KEY)).json() == {"organization_id": ALPHA}
+    assert client.get("/me", headers=_h(BRAVO_KEY)).json() == {"organization_id": BRAVO}
+    assert client.get("/me", headers=_h("not-a-key")).status_code == 401
+
+
+def test_totals_are_decimal_sums_per_effective_decision(client, app_engine):
+    """Fee lines count as charged; a refund line and a loss event do not (their amount is
+    money paid to the seller). Claimable sums the effective claims. Overrides move them."""
+    org, key = _syn(8)
+    fees = [
+        charge("SYN-1", defect_category="label", org=org),  # CLAIM 2.00
+        charge("SYN-2", unit_id="U-2", amount="3.15", org=org),  # REVIEW, no evidence
+        charge("SYN-3", unit_id="U-3", amount="1.10", org=org),  # refunded in full
+        charge(
+            "SYN-4",
+            unit_id="U-3",
+            amount="1.10",
+            report_type=ReportType.REIMBURSEMENT_REPORT,
+            org=org,
+        ),
+        charge(
+            "SYN-5",
+            unit_id="U-5",
+            amount="4.00",
+            charge_type=ChargeType.LOST_INBOUND,
+            report_type=ReportType.INVENTORY_ADJUSTMENT,
+            org=org,
+        ),
+    ]
+    r = prep_all_pass("SYN-PRP-1", org=org)
+    with org_session(app_engine, org) as s:
+        fid = repo.upsert_ingest_file(s, org, "totals.csv", uuid.uuid4().hex * 2, "fee_report")
+        repo.insert_charges(s, fees, fid)
+        repo.insert_records(
+            s, [r], {(r.agent, r.record_id): SourceRef(file_sha256="b" * 64, row=1, raw={})}, fid
+        )
+    run = run_org(app_engine, org, AS_OF)
+    decided = {d.subject.line_id: d.decision.value for d in run.decisions}
+    assert decided == {
+        "SYN-1": "CLAIM",
+        "SYN-2": "REVIEW",
+        "SYN-3": "DO_NOT_CLAIM",
+        "SYN-4": "DO_NOT_CLAIM",
+        "SYN-5": "REVIEW",
+    }
+
+    totals = client.get("/decisions", headers=_h(key)).json()["totals"]
+    assert totals == {
+        "ALL": {"count": 5, "fees_charged": {"USD": "6.25"}, "claimable": {"USD": "2.00"}},
+        "CLAIM": {"count": 1, "fees_charged": {"USD": "2.00"}, "claimable": {"USD": "2.00"}},
+        "DO_NOT_CLAIM": {"count": 2, "fees_charged": {"USD": "1.10"}, "claimable": {}},
+        "REVIEW": {"count": 2, "fees_charged": {"USD": "3.15"}, "claimable": {}},
+    }
+    # Filters narrow items, never the totals.
+    filtered = client.get("/decisions?decision=CLAIM", headers=_h(key)).json()
+    assert len(filtered["items"]) == 1 and filtered["totals"] == totals
+
+    items = client.get("/decisions", headers=_h(key)).json()["items"]
+    syn2 = next(i for i in items if i["line_id"] == "SYN-2")
+    res = client.post(
+        f"/decisions/{syn2['record_id']}/overrides",
+        headers=_h(key),
+        json={"new_decision": "DO_NOT_CLAIM", "reason": "fee is correct", "reviewer": "asha"},
+    )
+    assert res.status_code == 201, res.text
+    moved = client.get("/decisions", headers=_h(key)).json()["totals"]
+    assert moved["REVIEW"] == {"count": 1, "fees_charged": {}, "claimable": {}}
+    assert moved["DO_NOT_CLAIM"] == {"count": 3, "fees_charged": {"USD": "4.25"}, "claimable": {}}
+    assert moved["ALL"] == totals["ALL"]

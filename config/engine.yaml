@@ -68,8 +68,9 @@ inbound_defect_categories:
 # be reimbursed for is doubtful or did not happen, so it is never a claim.
 # Outcomes are set by app/engine/assess.py. Rows with amount_needed: true are the claim
 # path: the evidence supports the loss but no amount can be computed (D-011), so they are
-# REVIEW until an authoritative unit value exists. Only those rows may suggest an override
-# with an amount. INSUFFICIENT and CONFLICTING evidence use the generic rules, not this table.
+# REVIEW until an authoritative unit value exists. Only those rows point to a unit value;
+# the claim is filed outside Alibi, since an override cannot claim a loss event (D-021).
+# INSUFFICIENT and CONFLICTING evidence use the generic rules, not this table.
 # `no_evidence` is added to the reason when nothing speaks to the charge (R_NO_RELEVANT_EVIDENCE).
 loss_event_outcomes:
   refund_issued_item_not_returned:

@@ -321,6 +321,7 @@ def test_loss_events_are_never_claim_even_with_supporting_evidence():
             assert _verdicts(d)["amount_computable"] == Verdict.FAIL
             assert d.claim is None
             assert d.next_action is not None and "unit value" in d.next_action
+            assert "cannot be made through an override" in d.next_action
 
 
 # --- loss events: one test per row of config loss_event_outcomes (D-016) ------------------
@@ -431,6 +432,7 @@ def test_refund_wrong_item_returned_is_supported_review_until_amount():
     assert d.decision == Decision.REVIEW and d.rule_id == "R_AMOUNT_NOT_COMPUTABLE"
     assert d.evidence_status == EvidenceStatus.SUPPORTED
     assert d.next_action is not None and "unit value" in d.next_action
+    assert "cannot be made through an override" in d.next_action
 
 
 def test_refund_no_return_in_window_is_insufficient_noting_consistency():

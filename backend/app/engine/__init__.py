@@ -68,8 +68,8 @@ NEXT_CONFIRM_CATEGORY = (
     "categories shown as passed here, override to CLAIM with the defect type as the reason."
 )
 NEXT_UNIT_VALUE = (
-    "Find the channel's reimbursement valuation for this unit (or an authoritative unit "
-    "value) and the claim window, then decide and record an override with the amount."
+    "Find an authoritative unit value for this unit and file the claim outside Alibi; "
+    "loss-event claims cannot be made through an override in this version (D-021)."
 )
 
 

@@ -2,6 +2,69 @@
 
 Update at the end of every session. Newest entry on top.
 
+### 2026-09-27 - Day 5 Phase 2 (guardian review fixes), branch `day5`
+- Done: fixed the approved findings from `docs/reviews/day5-guardian-findings.md`
+  (rules-guardian + test-guardian review of the Day 5 LLM layer, 2026-09-27), one commit
+  per finding, `make lint test` after each:
+  - **Highs:** (1) the explanation validator compared IDs/names against the raw trace
+    string with `in`, so a substring match let a shorter, wrong ID pass, and its ID patterns
+    were upper-case only, so a lower-case rendering was never checked; now whole-token sets,
+    case-folded. (2) decision-word checking only looked in capitals, so lower-case wording
+    arguing for a different decision ("you should claim the fee now" on a REVIEW record)
+    passed; now also scanned case-insensitively. (3) the no-network test guard was a
+    function-scoped fixture, so the session-scoped fixtures above it ran unguarded, and a
+    loopback proxy could forward traffic out anyway; the guard is now installed at
+    conftest.py import time, blocks `connect_ex` too, and proxy/LLM env vars are forced off.
+  - **Mediums:** (4) a per-run time budget (`LLM_RUN_BUDGET_S`) so one slow model cannot
+    exceed the deploy's request timeout and roll back a whole run. (5) an overridden record
+    now gets its own explanation and clears `model_version`, instead of keeping the engine's.
+    (6) numbers/currencies are now tied to their meaning: no currency symbol or wrong code,
+    no percentage, no number word, no negative number, and the figure nearest "claim" must be
+    the claim amount. (7)-(10) tests added for previously-surviving mutants (explanation
+    hash, cache re-validation and its key, a two-currency totals sum, the Vertex key file's
+    credentials reaching the client) - each confirmed to catch its mutant by hand. (11) the
+    eval report's model-cost line always printed "$0.00" and "no model version"; it now
+    reads each decision's own recorded tokens/cost/model id and separates real calls from
+    cache hits.
+  - **Lows:** (12) the explanation fallback path itself could raise (build_trace/_template
+    unguarded), and pipeline.run_org's fail-open path had no guard around its own call to it;
+    both now guarded, with a constant last-resort text that cannot fail. (16) the prompt now
+    wraps the trace in `<trace>` tags and tells the model to ignore instructions inside it
+    (report-supplied strings reach the trace). (17) `deploy/supabase.sql` and `bin/check-db`
+    no longer take passwords as command-line arguments (psql `\getenv`, `CHECK_DB_URL` env
+    var); verified against a scratch database in the local Postgres container.
+  - Findings 13, 14, 18, 19 moved to `docs/BACKLOG.md` (human lead decision).
+  - `make eval` was not run (labels still not in).
+- Reviews of the fixes themselves (rules-guardian, test-guardian; see the real output pasted
+  into this session's transcript):
+  - rules-guardian: no Critical or High. One Medium (ARCHITECTURE.md and D-022 did not
+    describe the new validator/prompt/override/budget behaviour) fixed with a dated D-022
+    amendment and an ARCHITECTURE.md update. Three Low findings added to `docs/BACKLOG.md`
+    (`LLM_RUN_BUDGET_S` missing from `.env.example`; the anti-argument checks are
+    non-exhaustive denylists; the fail-open explanation guard swallows errors with no audit
+    trail, same class as backlog item 14). Confirmed: the decision/amount/citation path is
+    untouched by every change (rule 2); the override change is a read-time derived view, not
+    a rewrite of stored data (rule 11); the fail-open path stays safe (rule 5); no secret was
+    introduced (rule 14); the trace is now delimited in the prompt (rule 10 concern, finding
+    16, already fixed).
+  - test-guardian: no dishonesty (no weakened tests, no fixture/label edits, no mocks in the
+    eval path, no new skip/xfail); real `make test` output matched the claimed counts. One
+    gap: the manual check that findings 2/6 don't false-positive on the engine's real
+    `next_action` text (with its literal "(D-021)" citations) was not an automated test.
+    Writing that test found a genuine regression from finding 2: the engine's own
+    R_REIMBURSEMENT_AMBIGUOUS advice ("...close the line as do not claim (D-021)") was
+    wrongly read as arguing DO_NOT_CLAIM on a REVIEW record. Fixed (`_OVERRIDE_ADVISORY`
+    strips that phrase before the signal check runs) and covered by a new test against
+    `_decision_signals()` directly, since a separate pre-existing gap — `(D-0NN)` citations
+    read as unrecognized IDs by the ID check — would otherwise reject the same text for an
+    unrelated reason; that gap is now tracked in `docs/BACKLOG.md`, not fixed (out of the
+    scope the human lead set for this session).
+- Tests/eval status: `make lint test` green throughout, one commit at a time; 439 backend
+  and 48 eval tests at the end (up from 412 and 46 at the start of the session).
+- Next step: human lead reviews this session's fixes, the two guardian reports and the new
+  `docs/BACKLOG.md` items (the `(D-0NN)`-as-ID gap chief among them); labelling still blocks
+  `make eval`.
+
 ### 2026-09-27 - Day 4 polish (review UI design pass, demo data), branch `day4-polish`
 - Done:
   - Frontend only; no backend, engine or migration change. `make eval` not run.

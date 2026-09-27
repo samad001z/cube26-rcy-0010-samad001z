@@ -1,99 +1,174 @@
 @import "tailwindcss";
 
-/* Tokens. Decision colours carry meaning, so every badge also carries its word. */
+/*
+ * Design tokens. Neutral greys, one accent (blue) and three decision colours that mean the
+ * same thing everywhere: CLAIM green, DO NOT CLAIM slate, REVIEW amber. Colour is never the
+ * only signal: every chip also carries an icon and its word. Text/background pairs are
+ * checked for WCAG AA (4.5:1) in both themes. The theme follows the operating system.
+ */
 :root {
-  --bg: #f6f6f3;
+  --background: #fafafa;
   --surface: #ffffff;
-  --surface-2: #fafaf8;
-  --ink: #1a1c1e;
-  --muted: #62676d;
-  --line: #e2e2dd;
-  --focus: #2f5bd3;
+  --surface-2: #f4f4f5;
+  --foreground: #18181b;
+  --muted-foreground: #52525b;
+  --border: #e4e4e7;
+  --border-strong: #d4d4d8;
+  --input: #d4d4d8;
+  --ring: #2563eb;
 
-  --claim: #17693f;
-  --claim-bg: #e3f3ea;
-  --claim-line: #8fcfa9;
-  --dnc: #475360;
-  --dnc-bg: #eceef1;
-  --dnc-line: #b7bec6;
-  --review: #8a4f00;
-  --review-bg: #fcefd6;
-  --review-line: #efc57a;
-  --fail: #a4262c;
-  --fail-bg: #fbe7e8;
-  --pass: #17693f;
-  --pass-bg: #e3f3ea;
-  --unc: #8a4f00;
-  --unc-bg: #fcefd6;
+  --accent: #2563eb;
+  --accent-foreground: #ffffff;
+  --accent-soft: #eff6ff;
+  --accent-text: #1d4ed8;
+
+  --claim: #15803d;
+  --claim-soft: #f0fdf4;
+  --claim-line: #bbf7d0;
+  --dnc: #475569;
+  --dnc-soft: #f1f5f9;
+  --dnc-line: #cbd5e1;
+  --review: #b45309;
+  --review-soft: #fffbeb;
+  --review-line: #fde68a;
+
+  --pass: #15803d;
+  --pass-soft: #f0fdf4;
+  --fail: #b91c1c;
+  --fail-soft: #fef2f2;
+  --fail-line: #fecaca;
+  --unc: #b45309;
+  --unc-soft: #fffbeb;
+
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 1px 1px rgb(0 0 0 / 0.02);
+  --overlay: rgb(9 9 11 / 0.4);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #121416;
-    --surface: #1a1d20;
-    --surface-2: #1f2226;
-    --ink: #e8e9ea;
-    --muted: #9aa0a6;
-    --line: #2d3136;
-    --focus: #7d9cf0;
+    --background: #09090b;
+    --surface: #111113;
+    --surface-2: #18181b;
+    --foreground: #fafafa;
+    --muted-foreground: #a1a1aa;
+    --border: #27272a;
+    --border-strong: #3f3f46;
+    --input: #3f3f46;
+    --ring: #60a5fa;
 
-    --claim: #6fd49d;
-    --claim-bg: #16301f;
-    --claim-line: #2f6b47;
-    --dnc: #b3bcc6;
-    --dnc-bg: #262b31;
-    --dnc-line: #4a525b;
-    --review: #f2bd62;
-    --review-bg: #33260f;
-    --review-line: #6e5118;
-    --fail: #f08b8f;
-    --fail-bg: #3a1a1c;
-    --pass: #6fd49d;
-    --pass-bg: #16301f;
-    --unc: #f2bd62;
-    --unc-bg: #33260f;
+    --accent: #2563eb;
+    --accent-foreground: #ffffff;
+    --accent-soft: #172033;
+    --accent-text: #93c5fd;
+
+    --claim: #4ade80;
+    --claim-soft: #0c2416;
+    --claim-line: #14532d;
+    --dnc: #cbd5e1;
+    --dnc-soft: #1c232e;
+    --dnc-line: #334155;
+    --review: #fbbf24;
+    --review-soft: #2a1d05;
+    --review-line: #713f12;
+
+    --pass: #4ade80;
+    --pass-soft: #0c2416;
+    --fail: #f87171;
+    --fail-soft: #2c0f0f;
+    --fail-line: #7f1d1d;
+    --unc: #fbbf24;
+    --unc-soft: #2a1d05;
+
+    --shadow: 0 1px 2px rgb(0 0 0 / 0.4);
+    --overlay: rgb(0 0 0 / 0.6);
   }
 }
 
 @theme inline {
-  --color-bg: var(--bg);
+  --color-background: var(--background);
   --color-surface: var(--surface);
   --color-surface-2: var(--surface-2);
-  --color-ink: var(--ink);
-  --color-muted: var(--muted);
-  --color-line: var(--line);
-  --color-focus: var(--focus);
+  --color-foreground: var(--foreground);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-text: var(--accent-text);
   --color-claim: var(--claim);
-  --color-claim-bg: var(--claim-bg);
+  --color-claim-soft: var(--claim-soft);
   --color-claim-line: var(--claim-line);
   --color-dnc: var(--dnc);
-  --color-dnc-bg: var(--dnc-bg);
+  --color-dnc-soft: var(--dnc-soft);
   --color-dnc-line: var(--dnc-line);
   --color-review: var(--review);
-  --color-review-bg: var(--review-bg);
+  --color-review-soft: var(--review-soft);
   --color-review-line: var(--review-line);
-  --color-fail: var(--fail);
-  --color-fail-bg: var(--fail-bg);
   --color-pass: var(--pass);
-  --color-pass-bg: var(--pass-bg);
+  --color-pass-soft: var(--pass-soft);
+  --color-fail: var(--fail);
+  --color-fail-soft: var(--fail-soft);
+  --color-fail-line: var(--fail-line);
   --color-unc: var(--unc);
-  --color-unc-bg: var(--unc-bg);
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
-    Arial, sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --color-unc-soft: var(--unc-soft);
+  --color-overlay: var(--overlay);
+  --shadow-card: var(--shadow);
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --animate-sheet-in: sheet-in 180ms ease-out;
+  --animate-fade-in: fade-in 150ms ease-out;
+}
+
+@keyframes sheet-in {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+html {
+  color-scheme: light dark;
 }
 
 body {
-  background: var(--bg);
-  color: var(--ink);
+  background: var(--background);
+  color: var(--foreground);
   font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
 }
 
 :focus-visible {
-  outline: 2px solid var(--focus);
+  outline: 2px solid var(--ring);
   outline-offset: 2px;
 }
 
+/* Money and counts: digits line up in columns. */
 .num {
   font-variant-numeric: tabular-nums;
 }

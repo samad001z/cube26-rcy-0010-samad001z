@@ -1,0 +1,26 @@
+ok    alibi_app may only SELECT, INSERT: attachments
+ok    alibi_app may only SELECT, INSERT: audit_events
+ok    alibi_app may only SELECT, INSERT: charges
+ok    alibi_app may only SELECT, INSERT: decision_overrides
+ok    alibi_app may only SELECT, INSERT: decisions
+ok    alibi_app may only SELECT, INSERT: evidence_records
+ok    alibi_app may only SELECT, INSERT: ingest_files
+ok    alibi_app may only SELECT, INSERT: llm_explanations
+ok    alibi_app may only SELECT, INSERT: quarantined_rows
+ok    both roles exist
+ok    connection uses SSL (required on Supabase; false is normal on localhost)
+ok    no Data API role can use the schema: anon
+ok    no Data API role can use the schema: authenticated
+ok    rls enabled and forced: attachments
+ok    rls enabled and forced: audit_events
+ok    rls enabled and forced: charges
+ok    rls enabled and forced: decision_overrides
+ok    rls enabled and forced: decisions
+ok    rls enabled and forced: evidence_records
+ok    rls enabled and forced: ingest_files
+ok    rls enabled and forced: llm_explanations
+ok    rls enabled and forced: quarantined_rows
+ok    role cannot bypass RLS and is not superuser: alibi_app
+ok    role cannot bypass RLS and is not superuser: alibi_owner
+ok    tables migrated (at least 9)
+check-db: all checks passed

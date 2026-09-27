@@ -1,0 +1,24 @@
+ok    API /health: ok, database ok
+ok    API /me without a key: 401
+ok    API /me with a wrong key: 401
+ok    API /me with the alpha key: org_demo_alpha
+ok    API /me with the bravo key: org_demo_bravo
+ok    API alpha has a run
+ok    API alpha's newest run has the 10 demo lines: 3 CLAIM, 3 DO NOT CLAIM, 4 REVIEW
+ok    API totals cover the whole run
+ok    API bravo has its own run
+ok    API bravo's list has none of alpha's decisions
+ok    API bravo's list has no demo (alpha) lines
+ok    API bravo fetching an alpha decision by ID: 404
+ok    API alpha fetching a bravo decision by ID: 404
+ok    API alpha fetching its own decision: 200
+ok    UI without a session redirects to sign-in
+ok    UI refuses a wrong key
+ok    UI signs in with the alpha key
+ok    UI top bar names org_demo_alpha (GET /me)
+ok    UI key cookie is not readable by page scripts
+ok    UI decisions list shows the run's charge count
+ok    UI opens a decision (DEMO-F01-1, CLAIM)
+ok    UI signs out
+ok    UI raised no page errors
+smoke-live: all 23 checks passed (https://alibi-api-cvkvkc3ssq-ts.a.run.app, https://alibi-recovery.vercel.app)

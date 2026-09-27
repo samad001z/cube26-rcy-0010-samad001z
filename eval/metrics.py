@@ -50,6 +50,18 @@ def labels_are_blank(path: Path) -> bool:
     return not any(label for _n, _cid, label, _reason in read_label_rows(path))
 
 
+def blank_label_count(path: Path) -> tuple[int, int]:
+    """(rows with no label yet, total rows). An absent file is (0, 0). Used to tell a
+    partially-filled labels_B.csv (some rows done, some not) from the fully-blank template
+    (labels_are_blank) and a fully-filled file: a partial file must refuse the eval, never
+    silently fall back to single-labeller mode."""
+    if not path.is_file():
+        return (0, 0)
+    rows = read_label_rows(path)
+    blank = sum(1 for _n, _cid, label, _reason in rows if not label.strip())
+    return (blank, len(rows))
+
+
 def read_labels(path: Path, case_ids: Sequence[str]) -> dict[str, str]:
     """case_id -> label for every case in `case_ids`. Refuses blanks, unknown labels,
     unknown or repeated case ids, and missing cases."""

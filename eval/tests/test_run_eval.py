@@ -337,6 +337,23 @@ def test_single_labeller_mode_falls_back_to_two_labeller_once_b_is_filled(repo, 
     assert called == [1]
 
 
+def test_partial_labels_b_refuses_naming_how_many_rows_are_blank(repo, capsys):
+    # Fix 2: a labels_B.csv with some rows done and some not is neither mode. It must refuse,
+    # never silently fall back to single-labeller mode.
+    _labels(repo, "labels_A.csv", ["CLAIM", "REVIEW", "REVIEW"])
+    _labels(repo, "labels_B.csv", ["CLAIM", "", "REVIEW"])  # 1 of 3 rows still blank
+    assert run_eval.main() == run_eval.EXIT_REFUSED
+    assert "labels_B.csv: 1 of 3 row(s) have no label yet" in capsys.readouterr().err
+    assert not (repo / "REPORT.md").exists()
+
+
+def test_partial_labels_b_refuses_even_when_only_one_row_is_done(repo, capsys):
+    _labels(repo, "labels_A.csv", ["CLAIM", "REVIEW", "REVIEW"])
+    _labels(repo, "labels_B.csv", ["CLAIM", "", ""])  # 2 of 3 rows still blank
+    assert run_eval.main() == run_eval.EXIT_REFUSED
+    assert "labels_B.csv: 2 of 3 row(s) have no label yet" in capsys.readouterr().err
+
+
 def test_single_labeller_mode_still_requires_labels_a_committed(repo, capsys):
     _labels(repo, "labels_A.csv", ["CLAIM", "REVIEW", "REVIEW"], commit=False)
     assert run_eval.main() == run_eval.EXIT_REFUSED

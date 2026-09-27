@@ -23,7 +23,9 @@ against); REPORT.md says so plainly, at the top and in a Limitations section. Ev
 guard still applies: labels_A.csv must be committed with no uncommitted changes, its case
 ids must match the sheet exactly, and its labels must be one of CLAUDE.md's vocabulary.
 Switches back to two-labeller mode automatically once labels_B.csv is filled in and
-committed.
+committed. A labels_B.csv that is partially filled in (some rows labelled, some still
+blank) is neither mode: refuses, naming how many rows are still blank, rather than ever
+silently choosing single-labeller mode.
 
 Exit codes: 0 done; 2 refused; 3 disagreements unresolved (two-labeller mode only); 4 report
 written but the agent made at least one false claim (the PRD's hard gate); 5 a charge got no
@@ -70,6 +72,7 @@ from metrics import (
     LabelError,
     Score,
     agreement,
+    blank_label_count,
     build_gold,
     labels_are_blank,
     percentile,
@@ -556,6 +559,14 @@ def charge_types_of(report: Path = REPORT_CSV) -> dict[str, str]:
 def main() -> int:
     single = labels_are_blank(LABELS_B)
     try:
+        if not single:
+            blank, total = blank_label_count(LABELS_B)
+            if blank:
+                raise EvalRefused(
+                    f"{LABELS_B.name}: {blank} of {total} row(s) have no label yet; finish "
+                    "labelling before running the eval, or leave every row blank for "
+                    "single-labeller mode"
+                )
         required = [LABELS_A, SHEET_CSV, *DATA_FILES]
         if not single:
             required.append(LABELS_B)

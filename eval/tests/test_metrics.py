@@ -8,6 +8,7 @@ import pytest
 from metrics import (
     LabelError,
     agreement,
+    blank_label_count,
     build_gold,
     labels_are_blank,
     percentile,
@@ -91,6 +92,16 @@ def test_labels_are_blank_detects_absent_blank_and_filled_files(tmp_path):
     assert labels_are_blank(filled) is False
     partial = _csv(tmp_path, "partial.csv", "case_id,label,reason\n1,CLAIM,x\n2,,\n")
     assert labels_are_blank(partial) is False
+
+
+def test_blank_label_count_distinguishes_absent_blank_partial_and_complete(tmp_path):
+    assert blank_label_count(tmp_path / "absent.csv") == (0, 0)
+    blank = _csv(tmp_path, "blank.csv", "case_id,label,reason\n1,,\n2,,\n")
+    assert blank_label_count(blank) == (2, 2)
+    partial = _csv(tmp_path, "partial.csv", "case_id,label,reason\n1,CLAIM,x\n2,,\n3,REVIEW,y\n")
+    assert blank_label_count(partial) == (1, 3)
+    complete = _csv(tmp_path, "complete.csv", "case_id,label,reason\n1,CLAIM,x\n2,REVIEW,y\n")
+    assert blank_label_count(complete) == (0, 2)
 
 
 def test_gold_is_agreed_labels_plus_resolutions_and_lists_the_rest():

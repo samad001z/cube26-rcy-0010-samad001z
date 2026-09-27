@@ -2,6 +2,58 @@
 
 Update at the end of every session. Newest entry on top.
 
+### 2026-09-27 - Day 4 polish (review UI design pass, demo data), branch `day4-polish`
+- Done:
+  - Frontend only; no backend, engine or migration change. `make eval` not run.
+  - UI foundations:
+    - Radix primitives written in shadcn/ui style (the shadcn registry answers 403 here);
+    - lucide-react icons, and Geist Sans / Geist Mono through the `geist` package;
+    - light and dark tokens following the system;
+    - CLAIM green, DO NOT CLAIM slate, REVIEW amber, always shown with an icon and the word.
+  - App shell: sidebar, and a top bar with the run switcher, org name and sign-out.
+    - The org name is read at sign-in from the newest decision record into an httpOnly cookie, since no endpoint returns it.
+  - Sign-in card: show/hide key, error state, note on how the key is stored.
+  - Decisions list:
+    - count tiles of equal weight;
+    - TanStack Table 9: sortable, sticky header, URL filters applied by the backend, ID search, 25 rows a page;
+    - cards below 1024px;
+    - skeletons, empty and error states.
+  - `src/lib/reasons.ts`: a plain-English headline for each of the 22 rule ids the backend emits, falling back to the engine's reason.
+  - Detail page:
+    - Why box, with the engine's reason under Technical detail;
+    - checks list;
+    - evidence timeline with custody-window rails, cited records solid and read-only ones dashed;
+    - deadline card, and Record integrity with copy buttons;
+    - override side sheet that shows the backend's CLAIM refusal, and a history timeline.
+  - Demo data in `demo/`, 10 lines, all `org_demo_alpha`, `DEMO-` IDs:
+    - nothing taken or derived from `data/` or `eval/`;
+    - `make demo` runs it and `demo/check.sh` pins each line;
+    - "Load demo data" is on Run a report;
+    - no outcome depends on the run date.
+  - Human lead decisions (2026-09-27):
+    - demo is alpha only;
+    - tiles show counts only, with no money arithmetic in the UI;
+    - the check is a script, not a backend test.
+  - Backlog in `docs/BACKLOG.md`: Decimal totals from GET /decisions, and GET /me.
+  - Screenshots of the demo run are in `docs/screenshots/`, light and dark; README and frontend/README updated.
+- Tests/eval status:
+  - Frontend:
+    - `npx eslint` clean; `npx next build` passes.
+    - `node scripts/contrast.mjs`: every token pair is at least 4.5:1 in both themes.
+  - Screenshot script against `next start`: no console errors, no sideways scroll at 375px on any page, a solid 2px focus outline after Tab.
+  - Headless check:
+    - Load demo data made a run with 3 CLAIM, 3 DO NOT CLAIM and 4 REVIEW;
+    - the decision filter and search work;
+    - a bravo override was saved and shows in the history;
+    - the key cookie is invisible to `document.cookie`.
+  - `make lint test` green: 358 backend and 46 eval tests, unchanged.
+  - `make demo`: 10 lines = 3 CLAIM, 3 DO_NOT_CLAIM, 4 REVIEW, check passed.
+- Open issues:
+  - A run decides every charge stored for the org. On a database where the alpha sample was already loaded, the demo run also contains those 40 lines. `check.sh` looks only at `DEMO-` lines.
+  - The org name needs a run to exist first; GET /me is in the backlog.
+  - The earlier open issues stand, labelling above all.
+- Next step: human lead reviews and merges `day4-polish`; labelling; Day 5 LLM layer and deploy.
+
 ### 2026-09-27 - Day 4 (review UI, overrides hardened, fail-open end to end), branch `day4-ui`
 - Done:
   - `day4-ui` from `origin/main`, with `day4-review`'s two commits cherry-picked (override flow, review endpoints, Next.js UI).

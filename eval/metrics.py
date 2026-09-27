@@ -41,6 +41,15 @@ def read_label_rows(path: Path) -> list[tuple[int, str, str, str]]:
     return out
 
 
+def labels_are_blank(path: Path) -> bool:
+    """True when the label file does not exist, or exists but has no case labelled yet (the
+    still-blank template state: every `label` cell empty). Used to detect single-labeller
+    mode: labels_B.csv absent or blank means only labels_A.csv has labels."""
+    if not path.is_file():
+        return True
+    return not any(label for _n, _cid, label, _reason in read_label_rows(path))
+
+
 def read_labels(path: Path, case_ids: Sequence[str]) -> dict[str, str]:
     """case_id -> label for every case in `case_ids`. Refuses blanks, unknown labels,
     unknown or repeated case ids, and missing cases."""

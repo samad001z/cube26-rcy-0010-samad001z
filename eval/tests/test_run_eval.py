@@ -16,7 +16,7 @@ import pytest
 
 import run_eval
 from common import REPO_ROOT
-from metrics import agreement, build_gold
+from metrics import Gold, agreement, build_gold
 
 SHEET = "case_id,charge_line,evidence_summary,label,reason\n1,x,y,,\n2,x,y,,\n3,x,y,,\n"
 
@@ -190,6 +190,8 @@ def test_agent_run_and_report_end_to_end_on_the_development_sample():
     assert "## 4. Failure modes" in report and ids[0] in report
     assert "Model calls: 0" in report
     assert report.count("| agree |") + report.count("| disagree |") == 61
+    assert run_eval.SINGLE_LABELLER_NOTICE not in report  # two-labeller mode: unaffected
+    assert "## 1. Agreement between the two labellers" in report
 
 
 def _run(explanations: list[object]) -> run_eval.AgentRun:
@@ -299,6 +301,88 @@ def test_a_label_file_must_cover_exactly_the_sheets_cases(repo, capsys):
     _labels(repo, "labels_B.csv", ["CLAIM", "REVIEW"])  # case 3 missing
     assert run_eval.main() == run_eval.EXIT_REFUSED
     assert "no label for 1 case(s): 3" in capsys.readouterr().err
+
+
+# --- single-labeller mode --------------------------------------------------------------
+
+
+def test_single_labeller_mode_when_labels_b_is_absent(repo, monkeypatch):
+    _labels(repo, "labels_A.csv", ["CLAIM", "REVIEW", "REVIEW"])
+    called = _stub_agent(monkeypatch)
+    with pytest.raises(_Reached):
+        run_eval.main()
+    assert called == [1]
+
+
+def test_single_labeller_mode_when_labels_b_is_still_blank(repo, monkeypatch):
+    _labels(repo, "labels_A.csv", ["CLAIM", "REVIEW", "REVIEW"])
+    _labels(repo, "labels_B.csv", ["", "", ""])  # committed, but the still-blank template
+    called = _stub_agent(monkeypatch)
+    with pytest.raises(_Reached):
+        run_eval.main()
+    assert called == [1]
+
+
+def test_single_labeller_mode_falls_back_to_two_labeller_once_b_is_filled(repo, monkeypatch):
+    _labels(repo, "labels_A.csv", ["CLAIM", "REVIEW", "REVIEW"])
+    _labels(repo, "labels_B.csv", ["", "", ""])
+    (repo / "labels_B.csv").write_text(
+        "case_id,charge_line,evidence_summary,label,reason\n"
+        "1,x,y,CLAIM,because\n2,x,y,REVIEW,because\n3,x,y,REVIEW,because\n"
+    )
+    _git(repo, "commit", "-qam", "fill in B")
+    called = _stub_agent(monkeypatch)
+    with pytest.raises(_Reached):
+        run_eval.main()
+    assert called == [1]
+
+
+def test_single_labeller_mode_still_requires_labels_a_committed(repo, capsys):
+    _labels(repo, "labels_A.csv", ["CLAIM", "REVIEW", "REVIEW"], commit=False)
+    assert run_eval.main() == run_eval.EXIT_REFUSED
+    assert "labels_A.csv is not committed" in capsys.readouterr().err
+
+
+def test_single_labeller_mode_still_validates_vocabulary(repo, capsys):
+    _labels(repo, "labels_A.csv", ["CLAIM", "MAYBE", "REVIEW"])
+    assert run_eval.main() == run_eval.EXIT_REFUSED
+    assert "has label 'MAYBE'" in capsys.readouterr().err
+
+
+def test_single_labeller_mode_still_requires_case_ids_to_match_the_sheet(repo, capsys):
+    _labels(repo, "labels_A.csv", ["CLAIM", "REVIEW"])  # case 3 missing from the sheet's 3
+    assert run_eval.main() == run_eval.EXIT_REFUSED
+    assert "no label for 1 case(s): 3" in capsys.readouterr().err
+
+
+def test_single_labeller_report_states_agreement_not_measured():
+    """Plumbing only: the real pipeline on data/ (not the eval set), single-labeller mode."""
+    data = REPO_ROOT / "data"
+    run = run_eval.run_agent(
+        _env("TEST_DATABASE_URL"),
+        _env("TEST_MIGRATION_DATABASE_URL"),
+        report=data / "fee_report_sample.csv",
+        upstream=data / "upstream",
+    )
+    ids = sorted(run.decisions)
+    labels = {c: run.decisions[c].decision.value for c in ids}
+    labels[ids[0]] = "CLAIM"  # one synthetic missed claim, as in the two-labeller test
+    gold = Gold(labels=dict(labels), notes={}, unresolved=[])
+    types = run_eval.charge_types_of(data / "fee_report_sample.csv")
+    lab = run_eval.Labels(labels, {}, {}, {})
+    report = run_eval.render_report(
+        commit="0" * 40, ag=None, gold=gold, lab=lab, run=run, charge_types=types
+    )
+    assert report.count(run_eval.SINGLE_LABELLER_NOTICE) >= 2  # top (method) and Limitations
+    assert "## 1. Labelling" in report
+    assert "## 1. Agreement between the two labellers" not in report
+    assert "## Limitations" in report
+    assert "- Charges evaluated: **61**" in report
+    assert "missed claims: **1**" in report
+    assert "## 4. Failure modes" in report and ids[0] in report
+    # No "B" column: the per-case table's own header, not a stray "B" inside prose.
+    assert "| case | charge type | label (A) | gold | agent | agent vs gold | notes |" in report
+    assert "| case | charge type | A | B | gold | agent | agent vs gold | notes |" not in report
 
 
 def test_the_harness_judges_at_the_same_date_the_sheet_states():

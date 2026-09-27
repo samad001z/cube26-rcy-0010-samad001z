@@ -9,6 +9,7 @@ from metrics import (
     LabelError,
     agreement,
     build_gold,
+    labels_are_blank,
     percentile,
     read_labels,
     read_resolutions,
@@ -80,6 +81,16 @@ def test_read_labels_accepts_the_vocabulary_and_normalises_spacing(tmp_path):
 def test_read_labels_refuses_bad_files(tmp_path, body, message):
     with pytest.raises(LabelError, match=message):
         read_labels(_csv(tmp_path, "l.csv", body), ["1", "2"])
+
+
+def test_labels_are_blank_detects_absent_blank_and_filled_files(tmp_path):
+    assert labels_are_blank(tmp_path / "absent.csv") is True
+    blank = _csv(tmp_path, "blank.csv", "case_id,label,reason\n1,,\n2,,\n")
+    assert labels_are_blank(blank) is True
+    filled = _csv(tmp_path, "filled.csv", "case_id,label,reason\n1,CLAIM,x\n2,REVIEW,y\n")
+    assert labels_are_blank(filled) is False
+    partial = _csv(tmp_path, "partial.csv", "case_id,label,reason\n1,CLAIM,x\n2,,\n")
+    assert labels_are_blank(partial) is False
 
 
 def test_gold_is_agreed_labels_plus_resolutions_and_lists_the_rest():

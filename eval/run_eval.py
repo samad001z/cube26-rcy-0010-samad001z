@@ -1,12 +1,12 @@
-"""Evaluate the agent against the two humans' labels on the held-out set.
+"""Evaluate the agent against human labels on the held-out set.
 
     make eval        (cd backend && uv run python ../eval/run_eval.py)
 
-Refuses to run unless eval/labels_A.csv and eval/labels_B.csv exist, are committed to git
-with no uncommitted changes, and label every case of the sheet (only case_id, label and
-reason are read from them, so a Google Sheets or Excel export is fine); and unless the eval
-data and the sheet are committed and the data still produces exactly that sheet.
-Then:
+Two-labeller mode (both eval/labels_A.csv and eval/labels_B.csv filled in): refuses to run
+unless both exist, are committed to git with no uncommitted changes, and label every case of
+the sheet (only case_id, label and reason are read from them, so a Google Sheets or Excel
+export is fine); and unless the eval data and the sheet are committed and the data still
+produces exactly that sheet. Then:
 
 1. raw agreement and Cohen's kappa between A and B, before any resolution;
 2. gold labels: the shared label where A and B agree, else the committed row of
@@ -17,8 +17,17 @@ Then:
 4. eval/REPORT.md: claims, precision, false and missed claims, REVIEW rate, per charge type,
    latency, cost, failure modes and the per-case table.
 
-Exit codes: 0 done; 2 refused; 3 disagreements unresolved; 4 report written but the agent
-made at least one false claim (the PRD's hard gate); 5 a charge got no decision.
+Single-labeller mode (eval/labels_B.csv absent or still blank): gold is labels_A.csv
+directly; agreement and Cohen's kappa are not computed (there is nothing to compare A
+against); REPORT.md says so plainly, at the top and in a Limitations section. Every other
+guard still applies: labels_A.csv must be committed with no uncommitted changes, its case
+ids must match the sheet exactly, and its labels must be one of CLAUDE.md's vocabulary.
+Switches back to two-labeller mode automatically once labels_B.csv is filled in and
+committed.
+
+Exit codes: 0 done; 2 refused; 3 disagreements unresolved (two-labeller mode only); 4 report
+written but the agent made at least one false claim (the PRD's hard gate); 5 a charge got no
+decision.
 """
 
 import csv
@@ -62,6 +71,7 @@ from metrics import (
     Score,
     agreement,
     build_gold,
+    labels_are_blank,
     percentile,
     read_label_rows,
     read_labels,
@@ -76,6 +86,7 @@ EXIT_REFUSED, EXIT_UNRESOLVED, EXIT_FALSE_CLAIMS, EXIT_DROPPED = 2, 3, 4, 5
 # scored on data nobody labelled.
 DATA_FILES = sorted(DATA_DIR.rglob("*.csv"))
 SHEET_COLUMNS = ("case_id", "charge_line", "evidence_summary")
+SINGLE_LABELLER_NOTICE = "Single human labeller; inter-rater agreement not measured."
 
 
 class EvalRefused(RuntimeError):
@@ -261,7 +272,17 @@ class Labels:
     reason_b: dict[str, str]
 
 
-def agreement_section(ag: Agreement, lab: Labels) -> list[str]:
+def agreement_section(ag: Agreement | None, lab: Labels) -> list[str]:
+    if ag is None:
+        return [
+            "## 1. Labelling",
+            "",
+            f"**{SINGLE_LABELLER_NOTICE}**",
+            "",
+            f"- Cases labelled: **{len(lab.a)}** (labels_A.csv only)",
+            "- No second labeller: raw agreement and Cohen's kappa are not computed.",
+            "",
+        ]
     lines = [
         "## 1. Agreement between the two labellers (before any resolution)",
         "",
@@ -318,14 +339,25 @@ def _note(d: DecisionRecord) -> str:
 def render_report(
     *,
     commit: str,
-    ag: Agreement,
+    ag: Agreement | None,
     gold: Gold,
     lab: Labels,
     run: AgentRun | None,
     charge_types: dict[str, str],
 ) -> str:
+    single = ag is None
     a, b = lab.a, lab.b
     now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
+    labels_line = (
+        "Held-out set: `eval/data/` (see `eval/README.md`). Labels: `eval/labels_A.csv` "
+        "only (labels_B.csv is absent or still blank), committed before the agent ran. "
+        "Definitions are at the end."
+        if single
+        else (
+            "Held-out set: `eval/data/` (see `eval/README.md`). Labels: `eval/labels_A.csv` and "
+            "`eval/labels_B.csv`, committed before the agent ran. Definitions are at the end."
+        )
+    )
     out = [
         "# Evaluation report",
         "",
@@ -334,8 +366,8 @@ def render_report(
         f"rules `{load_rules().rules_hash[:12]}`, engine config "
         f"`{load_engine_config().config_hash[:12]}`.",
         "",
-        "Held-out set: `eval/data/` (see `eval/README.md`). Labels: `eval/labels_A.csv` and "
-        "`eval/labels_B.csv`, committed before the agent ran. Definitions are at the end.",
+        *([f"**{SINGLE_LABELLER_NOTICE}**", ""] if single else []),
+        labels_line,
         "",
         *agreement_section(ag, lab),
         "## 2. Gold labels",
@@ -352,11 +384,18 @@ def render_report(
         ]
         return "\n".join(out)
     dist = Counter(gold.labels.values())
+    gold_source = (
+        "All from a single labeller (labels_A.csv); inter-rater agreement not measured."
+        if single
+        else (
+            f"{len(gold.labels) - len(gold.notes)} agreed by both labellers, "
+            f"{len(gold.notes)} resolved after discussion."
+        )
+    )
     out += [
         f"{len(gold.labels)} cases: "
         + ", ".join(f"{k} {dist.get(k, 0)}" for k in LABELS)
-        + f". {len(gold.labels) - len(gold.notes)} agreed by both labellers, "
-        f"{len(gold.notes)} resolved after discussion.",
+        + f". {gold_source}",
         "",
     ]
     if gold.notes:
@@ -444,9 +483,31 @@ def render_report(
         "## 6. Every case",
         "",
     ]
-    out += _table(
-        ["case", "charge type", "A", "B", "gold", "agent", "agent vs gold", "notes"],
-        [
+    if single:
+        case_header = [
+            "case",
+            "charge type",
+            "label (A)",
+            "gold",
+            "agent",
+            "agent vs gold",
+            "notes",
+        ]
+        case_rows = [
+            [
+                c,
+                charge_types[c],
+                a[c],
+                gold.labels[c],
+                agent[c],
+                "agree" if agent[c] == gold.labels[c] else "disagree",
+                _note(run.decisions[c]),
+            ]
+            for c in sorted(gold.labels)
+        ]
+    else:
+        case_header = ["case", "charge type", "A", "B", "gold", "agent", "agent vs gold", "notes"]
+        case_rows = [
             [
                 c,
                 charge_types[c],
@@ -458,8 +519,18 @@ def render_report(
                 _note(run.decisions[c]),
             ]
             for c in sorted(gold.labels)
-        ],
-    )
+        ]
+    out += _table(case_header, case_rows)
+    if single:
+        out += [
+            "",
+            "## Limitations",
+            "",
+            f"- {SINGLE_LABELLER_NOTICE} These numbers reflect one person's judgement, not a "
+            "cross-checked gold standard; do not treat claim precision or REVIEW rate here as "
+            "validated until a second labeller's labels_B.csv is filled in, committed, and "
+            "`make eval` is run again in two-labeller mode.",
+        ]
     out += [
         "",
         "## Definitions",
@@ -483,21 +554,35 @@ def charge_types_of(report: Path = REPORT_CSV) -> dict[str, str]:
 
 
 def main() -> int:
+    single = labels_are_blank(LABELS_B)
     try:
-        commit = require_committed([LABELS_A, LABELS_B, SHEET_CSV, *DATA_FILES], REPO_ROOT)
+        required = [LABELS_A, SHEET_CSV, *DATA_FILES]
+        if not single:
+            required.append(LABELS_B)
+        commit = require_committed(required, REPO_ROOT)
         require_sheet_matches_data(build_rows())
         ids = sheet_case_ids(SHEET_CSV)
-        a, b = read_labels(LABELS_A, ids), read_labels(LABELS_B, ids)
-        ag = agreement(a, b)
-        if RESOLVED_CSV.exists():
-            require_committed([RESOLVED_CSV], REPO_ROOT)
-        gold = build_gold(a, b, read_resolutions(RESOLVED_CSV, ag.disagreements))
+        a = read_labels(LABELS_A, ids)
+        if single:
+            b: dict[str, str] = {}
+            ag: Agreement | None = None
+            gold = Gold(labels=dict(a), notes={}, unresolved=[])
+        else:
+            b = read_labels(LABELS_B, ids)
+            ag = agreement(a, b)
+            if RESOLVED_CSV.exists():
+                require_committed([RESOLVED_CSV], REPO_ROOT)
+            gold = build_gold(a, b, read_resolutions(RESOLVED_CSV, ag.disagreements))
     except (EvalRefused, LabelError) as exc:
         print(f"eval refused: {exc}", file=sys.stderr)
         return EXIT_REFUSED
-    lab = Labels(a, b, reasons(LABELS_A), reasons(LABELS_B))
+    lab = Labels(a, b, reasons(LABELS_A), {} if single else reasons(LABELS_B))
     types = charge_types_of()
-    print(f"agreement: {ag.agreed}/{ag.n} = {ag.raw}, Cohen's kappa {_pct(ag.kappa)}")
+    if single:
+        print(f"single-labeller mode: {len(a)} cases from labels_A; agreement not measured")
+    else:
+        assert ag is not None
+        print(f"agreement: {ag.agreed}/{ag.n} = {ag.raw}, Cohen's kappa {_pct(ag.kappa)}")
     if gold.unresolved:
         REPORT_MD.write_text(
             render_report(commit=commit, ag=ag, gold=gold, lab=lab, run=None, charge_types=types),

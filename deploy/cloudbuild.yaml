@@ -1,0 +1,8 @@
+# Cloud Build: build the API image from the repository root and push it to Artifact Registry.
+#   gcloud builds submit --config deploy/cloudbuild.yaml --substitutions _IMAGE=<image> .
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args: ["build", "-f", "backend/Dockerfile", "-t", "${_IMAGE}", "."]
+images: ["${_IMAGE}"]
+options:
+  logging: CLOUD_LOGGING_ONLY

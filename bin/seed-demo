@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Seeds a deployed database for the demo: the demo report for org_demo_alpha (demo/, checked
+# line by line with demo/check.sh) and the sample report for org_demo_bravo (data/), so the
+# live smoke test can check isolation between two orgs that both have rows. Never eval/ data.
+#
+#   DATABASE_URL=<alibi_app URL> ATTACHMENT_KEY_SECRET=<the deployed value> \
+#   SEED_CONFIRM_HOST=<the host in DATABASE_URL> bin/seed-demo
+#
+# It connects as the app role (row-level security applies), never the owner. It refuses
+# unless SEED_CONFIRM_HOST repeats the database host, so it cannot hit the wrong database
+# by accident. Re-running is safe: ingest is idempotent and each run adds a new run.
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+: "${DATABASE_URL:?set DATABASE_URL (alibi_app connection URL)}"
+: "${ATTACHMENT_KEY_SECRET:?set ATTACHMENT_KEY_SECRET to the value the API uses}"
+export DATABASE_URL ATTACHMENT_KEY_SECRET
+export MIGRATION_DATABASE_URL="${MIGRATION_DATABASE_URL:-unused-by-seed}"
+export LLM_ENABLED="${LLM_ENABLED:-false}"
+
+cd "$ROOT/backend"
+host="$(uv run python -c 'import os; from sqlalchemy.engine import make_url; print(make_url(os.environ["DATABASE_URL"]).host or "")')"
+if [ "${SEED_CONFIRM_HOST:-}" != "$host" ]; then
+  echo "seed-demo: refusing. Set SEED_CONFIRM_HOST=$host to confirm this is the database to seed." >&2
+  exit 2
+fi
+user="$(uv run python -c 'import os; from sqlalchemy.engine import make_url; print(make_url(os.environ["DATABASE_URL"]).username or "")')"
+case "$user" in
+  alibi_app|alibi_app.*) ;;
+  *) echo "seed-demo: DATABASE_URL must connect as alibi_app (got '$user')" >&2; exit 2 ;;
+esac
+
+echo "seed-demo: org_demo_alpha <- demo/ (demo data)"
+uv run alibi run --report ../demo/fee_report_demo.csv --upstream ../demo/upstream/ \
+  --org org_demo_alpha --json > ../demo/.last_run.json
+../demo/check.sh ../demo/.last_run.json
+
+echo "seed-demo: org_demo_bravo <- data/ (sample data)"
+uv run alibi run --report ../data/fee_report_sample.csv --upstream ../data/upstream/ \
+  --org org_demo_bravo | tail -2
+echo "seed-demo: done on $host"

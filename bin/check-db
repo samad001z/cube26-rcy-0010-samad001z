@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Checks roles, RLS and grants of a migrated Alibi database (deploy/check-db.sql).
+#   bin/check-db "<owner connection URL>" [schema]     schema: alibi (Supabase) or public
+# Fails if any check is false. The SSL check is only enforced for non-local hosts.
+set -euo pipefail
+url="${1:?usage: bin/check-db <owner-url> [schema]}"
+schema="${2:-alibi}"
+# psql wants a plain postgresql:// URL (SQLAlchemy's +psycopg suffix is dropped).
+url="${url/postgresql+psycopg:/postgresql:}"
+out="$(psql "$url" -X -v ON_ERROR_STOP=1 -v schema="$schema" -At -F $'\t' \
+  -f "$(dirname "$0")/../deploy/check-db.sql")"
+fail=0
+while IFS=$'\t' read -r check ok; do
+  if [ "$ok" = "t" ]; then mark="ok  "; else mark="FAIL"; fi
+  if [ "$ok" != "t" ] && [[ "$check" == connection\ uses\ SSL* ]] && [[ "$url" == *@localhost* || "$url" == *@127.0.0.1* ]]; then
+    mark="skip"
+  elif [ "$ok" != "t" ]; then
+    fail=1
+  fi
+  echo "$mark  $check"
+done <<< "$out"
+if [ "$fail" = 1 ]; then echo "check-db: FAILED" >&2; exit 1; fi
+echo "check-db: all checks passed"

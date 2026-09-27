@@ -1,0 +1,16 @@
+# Only backend/ and config/ go into the API image. Everything else stays out, above all
+# anything that could hold a credential.
+**
+!backend/pyproject.toml
+!backend/uv.lock
+!backend/app/**
+!backend/alembic/**
+!backend/alembic.ini
+!config/**
+**/__pycache__
+**/*.pyc
+**/.env
+**/.env.*
+**/*service-account*.json
+**/*credentials*.json
+**/.secrets

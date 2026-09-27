@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Live smoke test of a deployment: API health, keys, org isolation, UI sign-in and list.
+#   API_URL=... UI_URL=... ALPHA_KEY=... BRAVO_KEY=... bin/smoke-live
+# See frontend/scripts/smoke-live.mjs for the checks. Needs `npm ci` in frontend/ once and
+# Chromium for Playwright (npx playwright install chromium).
+set -euo pipefail
+cd "$(dirname "$0")/../frontend"
+exec node scripts/smoke-live.mjs

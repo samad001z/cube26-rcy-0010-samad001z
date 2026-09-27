@@ -77,7 +77,7 @@ ui:
 	cd frontend && npm install && ALIBI_BACKEND_URL=$${ALIBI_BACKEND_URL:-http://localhost:8000} npm run dev
 
 ui-build:
-	cd frontend && npm ci && npx eslint && npx next build
+	cd frontend && npm ci && npx eslint && npm run build
 
 # One command: migrate, decide the sample for both demo orgs if they have no run, start the
 # API on :8000 with dev-only keys and the UI on :3000 (bin/review-ui). Needs Postgres up.

@@ -1,0 +1,19 @@
+# What `gcloud builds submit` uploads: the same allow-list as .dockerignore.
+**
+!backend/
+!backend/pyproject.toml
+!backend/uv.lock
+!backend/Dockerfile
+!backend/app/**
+!backend/alembic/**
+!backend/alembic.ini
+!config/**
+!deploy/
+!deploy/cloudbuild.yaml
+**/__pycache__
+**/*.pyc
+**/.env
+**/.env.*
+**/*service-account*.json
+**/*credentials*.json
+**/.secrets

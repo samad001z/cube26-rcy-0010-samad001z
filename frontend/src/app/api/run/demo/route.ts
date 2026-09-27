@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -7,13 +8,15 @@ import { KEY_COOKIE } from "@/lib/api";
 
 import { forwardToAgent } from "../forward";
 
-// Runs the demo data in demo/ (repo root) through POST /agent, exactly like an upload.
-// Demo data only: never data/ or eval/. ALIBI_DEMO_DIR overrides where it is read from.
+// Runs the demo data through POST /agent, exactly like an upload. Demo data only: never
+// data/ or eval/. Read from ALIBI_DEMO_DIR, else demo-data/ (the build's copy of ../demo,
+// shipped with this route), else ../demo (next dev in a checkout).
 const PODS = ["receiving", "prep", "pack", "returns"] as const;
 
 function demoDir(): string {
-  // Read at request time from the repository, not bundled (hence turbopackIgnore).
-  return process.env.ALIBI_DEMO_DIR ?? path.join(/*turbopackIgnore: true*/ process.cwd(), "..", "demo");
+  if (process.env.ALIBI_DEMO_DIR) return process.env.ALIBI_DEMO_DIR;
+  const built = path.join(/*turbopackIgnore: true*/ process.cwd(), "demo-data");
+  return existsSync(built) ? built : path.join(/*turbopackIgnore: true*/ process.cwd(), "..", "demo");
 }
 
 export async function POST(request: NextRequest) {

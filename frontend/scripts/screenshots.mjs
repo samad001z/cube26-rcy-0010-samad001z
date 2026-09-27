@@ -6,19 +6,9 @@
 // newest run of org_demo_alpha. Writes docs/screenshots/*.png (OUT overrides the folder) and
 // fails if any page scrolls sideways at phone width or logs a console error.
 import { mkdirSync } from "node:fs";
-import { createRequire } from "node:module";
 import path from "node:path";
 
-const require = createRequire(import.meta.url);
-function loadPlaywright() {
-  for (const from of [import.meta.url, "/opt/node22/lib/node_modules/"]) {
-    try {
-      return createRequire(from)("playwright");
-    } catch {}
-  }
-  return require("playwright");
-}
-const { chromium } = loadPlaywright();
+import { chromium } from "playwright";
 
 const BASE = process.env.BASE_URL ?? "http://localhost:3000";
 const KEY = process.env.ALIBI_KEY;

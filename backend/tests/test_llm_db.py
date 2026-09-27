@@ -2,6 +2,8 @@
 the cache on a re-run, what is stored on the record, and that decisions do not move."""
 
 import json
+import uuid
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -18,7 +20,8 @@ from app.llm import vertex
 from app.llm.client import LLMRequest, LLMResponse
 from app.llm.config import LLMConfig
 from app.llm.explain import Explainer
-from app.llm.prompt import DECISION_WORDS
+from app.llm.prompt import DECISION_WORDS, PROMPT_VERSION
+from app.llm.trace import build_trace, trace_hash
 from app.models.charge import SourceRef
 from app.models.vocab import RecordStatus
 from app.pipeline import run_org
@@ -93,6 +96,29 @@ def test_one_call_per_decision_then_the_cache_on_a_rerun(app_engine, loaded):
         stored = {d.record_id: d for d in repo.list_decisions(s, second.run_id)}
     for d in second.decisions:
         assert stored[d.record_id] == d and stored[d.record_id].verify_hash()
+
+
+def test_bad_cached_explanation_is_revalidated_not_trusted(app_engine, loaded):
+    # Guardian finding 8: reusing cached text without re-validating survived as a mutant.
+    org = f"org_test_cache_{uuid.uuid4().hex[:8]}"
+    _load_synthetic(app_engine, org)
+    baseline = {d.subject.line_id: d for d in run_org(app_engine, org, AS_OF).decisions}
+    d = baseline["SYN-1"]
+    thash = trace_hash(build_trace(d), PROMPT_VERSION, "fixture-model")
+    bad_text = "CLAIM. This cites FAKE-ID-999 which is not part of this trace at all here."
+    with org_session(app_engine, org) as s:
+        repo.insert_cached_explanation(
+            s,
+            org,
+            repo.CachedExplanation(thash, PROMPT_VERSION, "fixture-model", bad_text, 10, 10),
+            datetime.now(UTC),
+        )
+    provider = TraceEcho()
+    result = run_org(app_engine, org, AS_OF, explainer=Explainer(provider=provider, cfg=_cfg()))
+    out = next(x for x in result.decisions if x.subject.line_id == "SYN-1").explanation
+    assert len(provider.requests) == 2  # the bad cache was not trusted: the model was asked
+    assert out is not None and out.source == "model" and not out.cached
+    assert "FAKE-ID-999" not in out.text
 
 
 def test_llm_off_stores_the_template_and_no_model_version(app_engine, loaded):

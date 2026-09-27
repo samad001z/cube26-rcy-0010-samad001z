@@ -512,6 +512,17 @@ def test_id_run_pattern_is_case_insensitive_and_exact():
         validate_explanation(_model_json(wrong), trace)
 
 
+def test_trace_hash_changes_with_model_and_prompt_version():
+    # Guardian finding 8: a mutant dropping model or prompt version from the cache key
+    # survived, so a stale cached explanation from a different model or prompt could be
+    # served under the wrong key.
+    trace = build_trace(_claim())
+    base = trace_hash(trace, "explain-v1", "model-a")
+    assert trace_hash(trace, "explain-v2", "model-a") != base
+    assert trace_hash(trace, "explain-v1", "model-b") != base
+    assert trace_hash(trace, "explain-v1", None) != base
+
+
 def test_template_uses_only_trace_facts():
     tr = build_trace(_claim())
     text = template_text(tr)

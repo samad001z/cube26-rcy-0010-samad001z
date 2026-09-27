@@ -83,6 +83,91 @@ def run(
         typer.echo(line)
 
 
+@app.command("llm-smoke")
+def llm_smoke(
+    org: Annotated[str, typer.Option(help="Organisation whose newest run to use")] = (
+        "org_demo_alpha"
+    ),
+    line: Annotated[
+        str | None, typer.Option(help="Charge line to explain (default: a CLAIM, else the first)")
+    ] = None,
+    record: Annotated[
+        Path | None, typer.Option(help="Save the raw response as a test fixture (JSON)")
+    ] = None,
+) -> None:
+    """Send one real decision trace to the configured model (whatever LLM_ENABLED says) and
+    print the validated explanation, latency, tokens and cost. Exit 0: the model's text was
+    used. Exit 3: it fell back to the template. Exit 2: settings or data missing. Nothing
+    is written to the database."""
+    from app.db import repo
+    from app.db.session import org_session
+    from app.llm.config import LLMConfigError, llm_config
+    from app.llm.explain import Explainer
+    from app.llm.vertex import VertexProvider
+
+    s = get_settings()
+    try:
+        cfg = llm_config(s.model_copy(update={"llm_enabled": True}))
+    except LLMConfigError as exc:
+        typer.echo(f"llm-smoke: {exc}", err=True)
+        raise typer.Exit(2) from None
+    with org_session(get_engine(), org) as session:
+        runs = repo.list_runs(session)
+        decisions = repo.list_decisions(session, runs[0].run_id) if runs else []
+    if line:
+        decisions = [d for d in decisions if d.subject.line_id == line]
+    if not decisions:
+        where = f"line {line} in " if line else ""
+        typer.echo(f"llm-smoke: no decision for {where}{org}; run `make demo` first", err=True)
+        raise typer.Exit(2)
+    # Default: a CLAIM if the run has one (the richest trace), else the first decision.
+    d = decisions[0] if line else next((x for x in decisions if x.claim), decisions[0])
+
+    provider = VertexProvider(cfg)
+    creds = str(cfg.credentials_file) if cfg.credentials_file else "Application Default Credentials"
+    typer.echo(f"provider  vertex  project {cfg.project}  location {cfg.location}")
+    typer.echo(f"model     {cfg.model}  (timeout {cfg.timeout_s}s, one attempt)")
+    typer.echo(f"auth      {creds}")
+    typer.echo(f"decision  {d.subject.line_id}  {d.decision.value}  {d.rule_id}  (run {d.run_id})")
+    typer.echo("")
+    x = Explainer(provider=provider, cfg=cfg).explanation_for(None, d)  # no cache: a real call
+
+    if record is not None and provider.last_response is not None:
+        dump = provider.last_response.model_dump(mode="json", exclude_none=True)
+        record.write_text(
+            json.dumps(
+                {
+                    "_about": f"recorded by make llm-smoke on {datetime.now(UTC).date()} "
+                    f"({cfg.model}, {d.subject.line_id})",
+                    "response": dump,
+                },
+                indent=2,
+            )
+            + "\n"
+        )
+        typer.echo(f"recorded  {record}")
+
+    if x.cost_estimate_usd is not None:
+        cost = f"{x.cost_estimate_usd} USD (estimate)"
+    else:
+        cost = x.cost_note or "- (no call completed)"
+    typer.echo(f"served by {x.model_id or 'no response'}")
+    typer.echo(f"latency   {x.latency_ms if x.latency_ms is not None else '-'} ms")
+    typer.echo(
+        f"tokens    in {x.input_tokens if x.input_tokens is not None else '-'}  "
+        f"out {x.output_tokens if x.output_tokens is not None else '-'} (incl. thinking)"
+    )
+    typer.echo(f"cost      {cost}")
+    typer.echo("")
+    if x.source == "model":
+        typer.echo("MODEL EXPLANATION USED (validated against the decision trace):")
+        typer.echo(x.text)
+        return
+    typer.echo(f"FELL BACK TO TEMPLATE: {x.fallback_reason}")
+    typer.echo(x.text)
+    raise typer.Exit(3)
+
+
 @app.command("api-key")
 def api_key(
     org: Annotated[str, typer.Option(help="Organisation the new key acts for")],

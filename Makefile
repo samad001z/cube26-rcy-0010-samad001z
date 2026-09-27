@@ -8,7 +8,7 @@ export EVAL_MIGRATION_DATABASE_URL ?= postgresql+psycopg://alibi_owner:local_dev
 export ATTACHMENT_KEY_SECRET ?= local-dev-attachment-secret
 export LLM_ENABLED ?= false
 
-.PHONY: install db-up db-down migrate lint fmt test dev run demo sheet eval ui ui-build review-ui
+.PHONY: install db-up db-down migrate lint fmt test dev run demo llm-smoke check-keys sheet eval ui ui-build review-ui
 
 install:
 	cd backend && uv sync
@@ -52,6 +52,17 @@ demo:
 		--upstream ../demo/upstream/ --org org_demo_alpha --json $(if $(AS_OF),--as-of $(AS_OF),) \
 		> ../demo/.last_run.json
 	demo/check.sh demo/.last_run.json
+
+# One real call to the configured model (LLM_PROVIDER, GOOGLE_CLOUD_PROJECT, GOOGLE_CLOUD_LOCATION,
+# LLM_MODEL; README "Model explanations"). Explains a decision of the newest run of ORG.
+# [LINE=DEMO-F01-1] [RECORD=backend/tests/fixtures/llm/<name>.json]. Exit 3 = fell back.
+llm-smoke:
+	cd backend && uv run alibi llm-smoke --org $(ORG) $(if $(LINE),--line $(LINE),) \
+		$(if $(RECORD),--record $(abspath $(RECORD)),)
+
+# Fails if any tracked file contains a private key field (also a CI step).
+check-keys:
+	bin/check-no-keys
 
 # Held-out eval (eval/README.md). `sheet` rebuilds the labelling sheet from eval/data.
 sheet:

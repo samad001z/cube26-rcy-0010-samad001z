@@ -41,6 +41,7 @@ class VertexProvider:
         self.cfg = cfg
         self.model_id = cfg.model
         self._client = client  # injected in tests; built lazily otherwise
+        self.last_response: Any = None  # the SDK response of the latest call (llm-smoke --record)
 
     def _get_client(self) -> Any:
         if self._client is None:
@@ -54,6 +55,8 @@ class VertexProvider:
             max_output_tokens=self.cfg.max_output_tokens,
             response_mime_type="application/json",
             response_json_schema=request.response_schema,
+            # No tools are offered; keep the SDK from its function-calling loop.
+            automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
         )
         started = time.perf_counter()
         try:
@@ -63,6 +66,7 @@ class VertexProvider:
         except Exception as exc:  # SDK, auth, network or timeout errors all fall back
             raise LLMError(f"{type(exc).__name__}: {exc}") from exc
         latency_ms = round((time.perf_counter() - started) * 1000)
+        self.last_response = response
         text = getattr(response, "text", None)
         if not text:
             reason = None

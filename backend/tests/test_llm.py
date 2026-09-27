@@ -15,6 +15,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from app.core.config import REPO_ROOT, Settings
+from app.core.hashing import content_hash
 from app.llm import vertex
 from app.llm.client import LLMError, LLMRequest, LLMResponse
 from app.llm.config import LLMConfig, LLMConfigError, llm_config
@@ -290,6 +291,9 @@ def test_disabled_explainer_never_calls_and_has_no_fallback_reason():
 
 def test_record_stored_before_explanations_still_verifies():
     d = _claim()  # hashed by the engine, no explanation
+    # The hash a record had before the field existed: its payload had no such key at all.
+    before = content_hash(d.model_dump(mode="python", exclude={"content_hash", "explanation"}))
+    assert d.content_hash == before
     body = d.model_dump(mode="json")
     assert body.pop("explanation") is None
     again = DecisionRecord.model_validate(body)

@@ -77,6 +77,23 @@ export interface Claim {
   computation: string[];
 }
 
+/** Plain-English explanation of a decision (D-022). Absent on records made before it existed. */
+export interface Explanation {
+  text: string;
+  /** "model": a model's text that passed validation against the trace; else the standard one. */
+  source: "model" | "template";
+  prompt_version: string;
+  trace_hash: string;
+  model_id: string | null;
+  cached: boolean;
+  latency_ms: number | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  cost_estimate_usd: string | null;
+  cost_note: string | null;
+  fallback_reason: string | null;
+}
+
 export interface Citation {
   kind: "evidence" | "charge";
   id: string;
@@ -126,6 +143,7 @@ export interface DecisionRecord {
   rules_hash: string;
   config_hash: string;
   model_version: string | null;
+  explanation?: Explanation | null;
 }
 
 export interface EvidenceRecordBody {

@@ -1,4 +1,4 @@
-import { ArrowRight, ChevronDown, TriangleAlert } from "lucide-react";
+import { ArrowRight, ChevronDown, FileText, Sparkles, TriangleAlert } from "lucide-react";
 
 import { Card } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -26,6 +26,27 @@ export function WhyCard({ r }: { r: DecisionRecord }) {
         <p className="mt-1.5 text-base font-medium leading-snug sm:text-lg">
           {headline(r.rule_id, r.subject.charge_type, r.reason)}
         </p>
+        {r.explanation && (
+          <div className="mt-3">
+            <p className="text-sm leading-relaxed">{r.explanation.text}</p>
+            <p className="mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+              {r.explanation.source === "model" ? (
+                <>
+                  <Sparkles className="size-3.5 shrink-0" aria-hidden />
+                  <span>
+                    Written by <span className="font-mono">{r.explanation.model_id}</span>, checked against this
+                    decision&apos;s evidence
+                  </span>
+                </>
+              ) : (
+                <>
+                  <FileText className="size-3.5 shrink-0" aria-hidden />
+                  Standard explanation
+                </>
+              )}
+            </p>
+          </div>
+        )}
         {r.next_action && (
           <div className="mt-4 flex gap-3 rounded-md bg-surface-2 p-3">
             <ArrowRight className="mt-0.5 size-4 shrink-0 text-accent-text" aria-hidden />
@@ -65,6 +86,42 @@ export function WhyCard({ r }: { r: DecisionRecord }) {
             {r.coverage !== null && (
               <Row name="Coverage">
                 <span className="num">{r.coverage}</span> of the charged units
+              </Row>
+            )}
+            {r.explanation && (
+              <Row name="Explanation">
+                {r.explanation.source === "model" ? "Model" : "Standard (template)"}
+                {r.explanation.model_id && (
+                  <>
+                    {" · "}
+                    <code className="font-mono text-xs">{r.explanation.model_id}</code>
+                  </>
+                )}
+                {r.explanation.cached && " · from cache"}
+                {r.explanation.input_tokens !== null && (
+                  <>
+                    {" · "}
+                    <span className="num">{r.explanation.input_tokens}</span> in /{" "}
+                    <span className="num">{r.explanation.output_tokens}</span> out tokens
+                  </>
+                )}
+                {r.explanation.latency_ms !== null && (
+                  <>
+                    {" · "}
+                    <span className="num">{r.explanation.latency_ms}</span> ms
+                  </>
+                )}
+                {r.explanation.cost_estimate_usd !== null && (
+                  <>
+                    {" · "}
+                    <span className="num">{r.explanation.cost_estimate_usd}</span> USD (estimate)
+                  </>
+                )}
+                {r.explanation.fallback_reason && (
+                  <span className="mt-1 block text-xs text-muted-foreground">
+                    Why the standard text: {r.explanation.fallback_reason}
+                  </span>
+                )}
               </Row>
             )}
             <Row name="Decided by">

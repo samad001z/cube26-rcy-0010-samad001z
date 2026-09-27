@@ -55,14 +55,6 @@ to the backlog rather than fixing them now.
   `test_real_engine_next_actions_do_not_trigger_a_false_decision_signal`. Fix: exclude a
   `\(D-\d+[a-z]?\)` citation pattern from the ID checks, the way `DNC` is already excluded as
   "a phrase, not an ID".
-- **ARCHITECTURE.md and docs/DECISIONS.md D-022 do not describe the validator or prompt
-  changes made this session** (rules-guardian, Medium). The "Validation" section and diagram
-  in ARCHITECTURE.md, and D-022's "Validation" and "Recorded on the decision" bullets in
-  DECISIONS.md, still describe the pre-Phase-2 checks only: no mention of the case-
-  insensitive anti-argument check (finding 2), the currency/percentage/number-word/negative-
-  number/claim-amount checks (finding 6), `LLM_RUN_BUDGET_S` (finding 4), the overridden
-  record getting its own explanation (finding 5), or the `<trace>` tags (finding 16). Fix:
-  a dated D-022 amendment (matching the D-021 amendment style) and an ARCHITECTURE.md update.
 - **`LLM_RUN_BUDGET_S` is not in `.env.example`** (rules-guardian, Low). Has a safe default
   (200), so not urgent; `LLM_TIMEOUT_S` has the same pre-existing gap.
 - **The anti-argument and number-word checks are denylists, not exhaustive** (rules-guardian,
@@ -74,3 +66,15 @@ to the backlog rather than fixing them now.
 - **`pipeline.py`'s `contextlib.suppress(Exception)` around the fail-open explanation call
   has no audit event or log for what failed** (rules-guardian, Low). Same class of issue as
   backlog item 14 (cache errors swallowed silently) — a second instance, not a regression.
+
+## Found during the final pre-eval pass (2026-09-27)
+
+- **The one pytest warning in the backend suite is a third-party deprecation, not ours to
+  silence cheaply.** `StarletteDeprecationWarning: Using httpx with starlette.testclient is
+  deprecated; install httpx2 instead` (`starlette/testclient.py:1`, surfaced through
+  `fastapi.testclient.TestClient`, used by `backend/tests/test_api_agent.py` and
+  `test_api_review.py`). Fixing it means adding the `httpx2` package (not yet released as a
+  stable, widely-used dependency at time of writing) or waiting for FastAPI/Starlette to
+  migrate their own `TestClient` internals. Not attempted this close to the deadline: a new
+  test-only dependency this late carries more risk than the warning itself. Revisit after
+  Round 2: pin or swap when `httpx2`/an updated `TestClient` is available upstream.

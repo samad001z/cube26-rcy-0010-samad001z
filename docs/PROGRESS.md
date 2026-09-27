@@ -2,6 +2,64 @@
 
 Update at the end of every session. Newest entry on top.
 
+### 2026-09-27 - Day 4 (review UI, overrides hardened, fail-open end to end), branch `day4-ui`
+- Done:
+  - `day4-ui` from `origin/main`, with `day4-review`'s two commits cherry-picked (override flow, review endpoints, Next.js UI).
+  - D-021 approved by the human lead as written on 2026-09-27, then amended (stricter only) after the second rules-guardian review. The amendment block in D-021 still needs the human lead's confirmation.
+  - Human CLAIM override is refused for:
+    - pending records, loss events and fee refund lines;
+    - an amount that is not the charge itself (claim_basis not full_amount, or amount_computable not PASS);
+    - a filing window that is FAIL, whether at the run or on the override day;
+    - reimbursements not settled, or changed in the store since the run;
+    - any decision other than the newest one for its line.
+  - Otherwise it goes through the citation validator; only "cites contradicting evidence" is skipped, because the stored reason stands in for it.
+  - Reproduced and closed: sample FEE-0071-2 (a loss event past its deadline) had been accepted as a 14.00 USD human CLAIM.
+  - History check covers the list, the line history and every new override: hash chain, recomputed claim cap, and row columns against body. `earlier_override` flags overrides made on older runs.
+  - `NEXT_UNIT_VALUE` reworded ("file the claim outside Alibi; loss-event claims cannot be made through an override"). The partial-coverage and ambiguous-refund next actions were reworded the same way.
+    - Sample decisions, rules, reason codes and counts are unchanged against the pre-change baseline: alpha 39 REVIEW / 1 DO_NOT_CLAIM, bravo 20 / 1.
+    - next_action changed on 2 alpha lines, so their content hashes changed.
+  - Both override limitations are in ROUND2_PLAN's README assumptions list.
+  - Gaps from the Day 4 spec, all built:
+    - (5) Equal-weight CLAIM / DO NOT CLAIM / REVIEW tiles.
+    - (6) Plain-English check names, with custody-window and deadline sentences. The deadline is judged today, with the run's own check shown beside it.
+    - (8) `make review-ui`: one command, bound to 127.0.0.1, dev-only keys, refuses a non-local database. Documented in README.
+    - (3) Fail-open end to end through POST /agent and GET /decisions.
+    - (1)(4) Filters by effective decision, charge type and rule, in API and UI.
+    - (2) `captured_at`, `custody_window` and `deadline` fields.
+    - (7) `earlier_override` shown on the list.
+    - (9) Headless browser check.
+  - ARCHITECTURE has a review, override and UI section.
+- Reviews:
+  - rules-guardian, three passes.
+    - First pass: 2 Critical (a human CLAIM bypassed every guard), 3 High, 2 Medium, 3 Low. All fixed or documented.
+    - Second pass: 2 High (a full-fee claim on a fee_difference charge; the store and date not re-checked), 3 Medium, 4 Low. All fixed.
+    - Third, focused pass: see the entry below this one, if any.
+  - test-guardian, three passes.
+    - First pass: the API override test only restored the engine's own decision; now fixed. Plus grant, ordering, raw-row and tamper tests.
+    - Second pass: 25 of 56 mutants survived in the new code. Tests were added and all 33 targeted mutants are now caught.
+- Tests/eval status:
+  - `make lint test` green: 353 backend and 46 eval tests on Postgres 16.
+  - `next build` passes.
+  - Headless Chromium against `make review-ui`, all passing, no console errors:
+    - sign-in and wrong-key refusal; cookie invisible to page JS;
+    - filters;
+    - plain-English detail page;
+    - override saved and its history shown;
+    - CLAIM not offered on a weight-tier fee or a loss event, with the reason shown;
+    - phone width with 0px overflow.
+  - `make eval` and anything on eval/ data were never run: the labels are still blank.
+- Open issues:
+  - Two humans still need to label `eval/labelling_sheet.csv` before `make eval`. This is the blocker for the evaluation section.
+  - The D-021 amendment (A1, A2 and the rest of the second-review changes) awaits the human lead's confirmation.
+  - Reviewer identity is self-declared (the org key identifies an organisation, not a person).
+  - Loss-event claims are filed outside Alibi.
+  - The fail-open e2e test raises OperationalError from `decide` while the database stays up. It does not cover a real lost connection, where writing the pending row could fail too.
+  - Migration 0004 was edited in place (the blank-reason constraint). A dev database already at 0004 keeps the old constraint: run `alembic downgrade 0003 && alembic upgrade head`. The test DB is rebuilt each run.
+  - `alibi_test` is shared: two concurrent `make test` runs clobber each other. A per-run database name would fix it.
+  - No request-size limit in front of the app yet (deploy work).
+- Environment: no Docker. Postgres 16 is the container install, with roles and databases from `docker/postgres/init.sh`. Node 22 was preinstalled; Playwright 1.56 is global, with Chromium in /opt/pw-browsers. The push needed the repo added to the session's GitHub scope.
+- Next step: human lead confirms the D-021 amendment and merges `day4-ui`; labelling; Day 5 LLM layer and deploy.
+
 ### 2026-09-26 - Day 4 (overrides, review endpoints, review UI), branch `day4-review` (cherry-picked onto `day4-ui` on 2026-09-27)
 - Done:
   - Override flow (D-021, proposed): `decision_overrides` table (migration 0004), append-only, forced RLS, FK to the decision, database checks (no-op, claim amount, blank reason or reviewer, unique sequence). `app/review`: effective record, hash chain re-checked on every read and before every override, human CLAIM = charged minus reimbursed, refused on pending records and when nothing remains, advisory lock per decision. Audit event `DECISION_OVERRIDDEN`. Closes triage finding 11.

@@ -14,6 +14,7 @@ from sqlalchemy import Engine
 from app.api.agent import db_engine
 from app.api.auth import configured_keys, hash_key, parse_api_keys
 from app.core.config import REPO_ROOT
+from app.engine import decide
 from app.main import app
 
 ORG = "org_failopen_alpha"
@@ -52,9 +53,6 @@ def client(app_engine: Engine, migrated_db: str) -> Iterator[TestClient]:
 def test_dependency_failure_mid_run_is_stored_as_pending_review_and_listed(
     client, files, monkeypatch
 ):
-    import app.pipeline as pipeline
-
-    real_decide = pipeline.decide
     calls: list[str] = []
 
     def decide_with_outage(charge, *args, **kwargs):
@@ -62,7 +60,7 @@ def test_dependency_failure_mid_run_is_stored_as_pending_review_and_listed(
         calls.append(charge.line_id)
         if len(calls) == 3:
             raise sa.exc.OperationalError("SELECT 1", {}, Exception("connection lost"))
-        return real_decide(charge, *args, **kwargs)
+        return decide(charge, *args, **kwargs)
 
     monkeypatch.setattr("app.pipeline.decide", decide_with_outage)
 

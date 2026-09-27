@@ -1,6 +1,6 @@
 # Architecture
 
-Status: partial. This file covers the decision path (Day 2), the API and the eval harness (Day 3). Deployment, the review UI and the LLM layer are added on later days.
+Status: partial. This file covers the decision path (Day 2), the API and the eval harness (Day 3), and human review and overrides (Day 4). Deployment and the LLM layer are added on later days.
 
 ## Decision path (one organisation, one run)
 
@@ -137,6 +137,36 @@ chosen date use `alibi run --as-of`.
   wrong key; alpha's key writes nothing under bravo; bravo's key sees none of alpha's lines,
   records or decisions; a body `organization_id` is ignored; the response matches the CLI
   JSON and every record verifies.
+
+## Human review and overrides (D-021)
+
+Review endpoints use the same `X-API-Key` and RLS session as `POST /agent`; another
+organisation's record answers 404, like a missing one. A database failure answers 503.
+
+- `GET /runs`: runs, newest first, with the engine's counts.
+- `GET /decisions?run_id=&decision=&charge_type=&rule_id=`: decisions of one run (default
+  the newest) with the effective decision. `decision` filters on the effective decision.
+  `counts` (effective) and `facets` describe the whole run. Each item carries
+  `integrity_problems` and `earlier_override` (a human override of the same line on an
+  earlier run, which a re-run does not carry over).
+- `GET /decisions/{id}`: effective and engine records, override history, integrity
+  problems, the charge, every evidence record read (cited or not, `captured_at`,
+  `custody_window` with its start, exclusive end and whether the record falls inside, hash
+  checks), a top-level `deadline` (open, passed, not yet open, not verified), earlier
+  decisions of the line, whether it can be overridden (newest decision only) and
+  `claim_refusal`.
+- `POST /decisions/{id}/overrides` `{new_decision, reason, reviewer}`: stores one override
+  in `decision_overrides` (append-only for the app role, forced RLS). The engine's decision
+  row is never changed. A human CLAIM claims charged minus reimbursed, is refused where the
+  engine could not settle what is owed (pending, loss event, fee refund line, filing window
+  closed or not open, reimbursement not settled, older run) and goes through the citation
+  validator. Every override writes a `DECISION_OVERRIDDEN` audit event.
+
+Review UI (`frontend/`, Next.js): sign-in with the org key into an httpOnly cookie; the
+decisions list (equal-weight CLAIM / DO NOT CLAIM / REVIEW totals, filters); the decision
+detail in plain English; the override form with a mandatory reason and the saved history.
+The UI computes no decision, amount or citation. `make review-ui` starts it against the
+local API with dev-only keys.
 
 ## Evaluation harness
 

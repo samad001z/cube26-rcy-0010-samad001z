@@ -1,6 +1,7 @@
 """Runtime settings, read from the environment and the repo-root .env (loaded automatically,
 whatever the working directory). Environment variables win over .env."""
 
+from decimal import Decimal
 from functools import lru_cache
 from pathlib import Path
 
@@ -25,6 +26,20 @@ class Settings(BaseSettings):
     # HMAC secret for attachment keys. Keys cannot be derived without it.
     attachment_key_secret: SecretStr
     llm_enabled: bool = False
+    # LLM layer (D-022): explanations only, never a decision, an amount or a citation.
+    # Checked by app.llm.config.llm_config only when LLM_ENABLED is true.
+    llm_provider: str | None = None  # "vertex" is the only provider implemented
+    google_cloud_project: str | None = None
+    google_cloud_location: str | None = None
+    llm_model: str | None = None  # no default: pick one enabled in the project (README)
+    # Local/dev only: a service-account key file OUTSIDE the repo. In production the Cloud
+    # Run service identity is used and this stays unset (DEPLOY.md).
+    google_application_credentials: str | None = None
+    llm_timeout_s: int = 20
+    llm_max_output_tokens: int = 1024
+    # Operator-supplied prices from the Vertex AI pricing page; no defaults (cost null if unset).
+    llm_price_input_usd_per_mtok: Decimal | None = None
+    llm_price_output_usd_per_mtok: Decimal | None = None
     # API keys for POST /agent: `org_id:sha256hex,...` (hashes only; see app/api/auth.py).
     # Empty means no key is valid, so POST /agent answers 401 to everyone.
     alibi_api_keys: str = ""

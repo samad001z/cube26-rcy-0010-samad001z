@@ -77,6 +77,27 @@ class Claim(_Frozen):
     computation: list[str]
 
 
+class Explanation(_Frozen):
+    """Plain-English explanation of a decision (D-022). Written only from the decision's
+    trace; never an input to the decision, its amount or its citations. `source` is "model"
+    when a model's text passed validation against the trace, else "template" (the standard
+    explanation, built from the trace by code), with `fallback_reason` saying why."""
+
+    text: str
+    source: Literal["model", "template"]
+    prompt_version: str
+    trace_hash: str
+    model_id: str | None = None
+    cached: bool = False
+    # Measured on this decision's call only: a cache hit costs 0 tokens.
+    latency_ms: int | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    cost_estimate_usd: Decimal | None = None
+    cost_note: str | None = None
+    fallback_reason: str | None = None
+
+
 class DecisionRecord(_Frozen):
     # contract fields
     record_id: str
@@ -116,6 +137,7 @@ class DecisionRecord(_Frozen):
     rules_hash: str
     config_hash: str
     model_version: str | None = None
+    explanation: Explanation | None = None
 
     @field_validator("captured_at")
     @classmethod
@@ -128,7 +150,12 @@ class DecisionRecord(_Frozen):
         return next(c for c in self.checks if c.check_key == key)
 
     def _hash_payload(self) -> dict[str, Any]:
-        return self.model_dump(mode="python", exclude={"content_hash"})
+        payload = self.model_dump(mode="python", exclude={"content_hash"})
+        # Records stored before explanations existed have no such key; leaving an empty one
+        # out keeps their stored hashes verifying.
+        if payload.get("explanation") is None:
+            payload.pop("explanation", None)
+        return payload
 
     def compute_hash(self) -> str:
         return content_hash(self._hash_payload())

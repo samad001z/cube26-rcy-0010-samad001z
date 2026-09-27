@@ -1,0 +1,25 @@
+{
+  "_about": "hand-written in the SDK response shape; explains the synthetic CLAIM in tests/test_llm.py",
+  "response": {
+    "candidates": [
+      {
+        "content": {
+          "role": "model",
+          "parts": [
+            {
+              "text": "{\"explanation\": \"CLAIM. Prep record PRP-1 shows fnsku_label_placement and original_barcode_covered passed before the fee on L-1 was posted, which contradicts the label defect. The full 2.00 USD can be claimed.\"}"
+            }
+          ]
+        },
+        "finish_reason": "STOP"
+      }
+    ],
+    "usage_metadata": {
+      "prompt_token_count": 1234,
+      "candidates_token_count": 56,
+      "thoughts_token_count": 100,
+      "total_token_count": 1390
+    },
+    "model_version": "fixture-model-001"
+  }
+}

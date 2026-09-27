@@ -1,0 +1,20 @@
+{
+  "_about": "hand-written; the text names an amount (7.35) that is not in the trace",
+  "response": {
+    "candidates": [
+      {
+        "content": {
+          "role": "model",
+          "parts": [
+            {
+              "text": "{\"explanation\": \"CLAIM. Prep record PRP-1 passed every check, so 7.35 USD can be claimed for L-1.\"}"
+            }
+          ]
+        },
+        "finish_reason": "STOP"
+      }
+    ],
+    "usage_metadata": {"prompt_token_count": 1200, "candidates_token_count": 40, "total_token_count": 1240},
+    "model_version": "fixture-model-001"
+  }
+}

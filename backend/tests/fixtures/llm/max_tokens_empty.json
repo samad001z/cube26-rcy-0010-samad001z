@@ -1,0 +1,8 @@
+{
+  "_about": "hand-written; the output budget ran out before any text (thinking used it up)",
+  "response": {
+    "candidates": [{"content": {"role": "model", "parts": []}, "finish_reason": "MAX_TOKENS"}],
+    "usage_metadata": {"prompt_token_count": 1200, "thoughts_token_count": 1024, "total_token_count": 2224},
+    "model_version": "fixture-model-001"
+  }
+}

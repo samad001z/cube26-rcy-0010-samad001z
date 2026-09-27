@@ -397,3 +397,47 @@ def overrides_by_record(
         o = OverrideRecord.model_validate(b)
         out.setdefault(o.decision_record_id, []).append(o)
     return out
+
+
+@dataclass(frozen=True)
+class CachedExplanation:
+    trace_hash: str
+    prompt_version: str
+    model_id: str
+    explanation: str
+    input_tokens: int
+    output_tokens: int
+
+
+def get_cached_explanation(session: Session, trace_hash: str) -> CachedExplanation | None:
+    row = session.execute(
+        sa.select(
+            t.llm_explanations.c.trace_hash,
+            t.llm_explanations.c.prompt_version,
+            t.llm_explanations.c.model_id,
+            t.llm_explanations.c.explanation,
+            t.llm_explanations.c.input_tokens,
+            t.llm_explanations.c.output_tokens,
+        ).where(t.llm_explanations.c.trace_hash == trace_hash)
+    ).first()
+    return CachedExplanation(*row) if row else None
+
+
+def insert_cached_explanation(
+    session: Session, organization_id: str, c: CachedExplanation, at: datetime
+) -> None:
+    """First write wins: a trace hash is written once per organisation."""
+    session.execute(
+        insert(t.llm_explanations)
+        .values(
+            organization_id=organization_id,
+            trace_hash=c.trace_hash,
+            prompt_version=c.prompt_version,
+            model_id=c.model_id,
+            explanation=c.explanation,
+            input_tokens=c.input_tokens,
+            output_tokens=c.output_tokens,
+            created_at=at,
+        )
+        .on_conflict_do_nothing(constraint="uq_llm_explanations_trace")
+    )

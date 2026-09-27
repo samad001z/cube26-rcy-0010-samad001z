@@ -124,3 +124,17 @@ decision_overrides = sa.Table(
     sa.Column("content_hash", sa.Text),
     sa.Column("body", pg.JSONB),
 )
+
+llm_explanations = sa.Table(
+    "llm_explanations",
+    metadata,
+    _id(),
+    sa.Column("organization_id", sa.Text),
+    sa.Column("trace_hash", sa.Text),
+    sa.Column("prompt_version", sa.Text),
+    sa.Column("model_id", sa.Text),
+    sa.Column("explanation", sa.Text),
+    sa.Column("input_tokens", sa.Integer),
+    sa.Column("output_tokens", sa.Integer),
+    sa.Column("created_at", sa.DateTime(timezone=True)),
+)

@@ -1,4 +1,6 @@
+import ipaddress
 import os
+import socket
 from collections.abc import Iterator
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -22,6 +24,27 @@ SECRET = "test-secret"
 ALPHA = "org_demo_alpha"
 BRAVO = "org_demo_bravo"
 AS_OF = date(2026, 9, 25)
+
+
+@pytest.fixture(autouse=True)
+def no_network(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tests never reach the network (the LLM provider above all). Loopback and Unix
+    sockets stay open for Postgres; anything else raises. psycopg connects through libpq,
+    not Python sockets, so the database is unaffected either way."""
+    real_connect = socket.socket.connect
+
+    def guarded(self: socket.socket, address: object) -> None:
+        if self.family in (socket.AF_INET, socket.AF_INET6) and isinstance(address, tuple):
+            host = str(address[0])
+            try:
+                loopback = ipaddress.ip_address(host).is_loopback
+            except ValueError:
+                loopback = host == "localhost"
+            if not loopback:
+                raise RuntimeError(f"network access blocked in tests: {address!r}")
+        real_connect(self, address)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(socket.socket, "connect", guarded)
 
 
 def _env(name: str) -> str:
@@ -77,6 +100,18 @@ def loaded(app_engine: Engine) -> dict[str, IngestSummary]:
         with org_session(app_engine, org) as session:
             repo.insert_quarantined(
                 session, org, [Quarantined("bad.csv", 1, "unmapped value 'x'", {"line_id": "X"})]
+            )
+    # One cached explanation per org through the real repo function, for the isolation
+    # tests on llm_explanations (the pipeline only writes it when LLM_ENABLED).
+    for org in (ALPHA, BRAVO):
+        with org_session(app_engine, org) as session:
+            repo.insert_cached_explanation(
+                session,
+                org,
+                repo.CachedExplanation(
+                    f"fixture-trace-{org}", "explain-v1", "fixture-model", "fixture text", 1, 1
+                ),
+                datetime(2026, 9, 25, 12, 0, tzinfo=UTC),
             )
     # Decide every charge through the real pipeline so the decisions table has rows per org.
     # One human override per org through the real review code, so decision_overrides has

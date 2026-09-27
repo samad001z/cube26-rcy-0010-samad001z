@@ -19,6 +19,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.claims.validator import StoredRecord, enforce, validate
+from app.core.config import get_settings
 from app.core.rules import (
     ChannelRules,
     EngineConfig,
@@ -29,6 +30,7 @@ from app.core.rules import (
 from app.db import repo
 from app.db.session import org_session
 from app.engine import DECIDED_BY, ENGINE_VERSION, decide
+from app.llm.explain import Explainer
 from app.models.charge import Charge
 from app.models.contract import Check, EvidenceRecord, Outcome
 from app.models.decision import DecisionRecord, DecisionSubject
@@ -56,7 +58,7 @@ class RunResult:
     organization_id: str
     as_of: date
     decisions: list[DecisionRecord]
-    # Wall-clock milliseconds per charge (decide, validate, persist), keyed by line_id.
+    # Wall-clock milliseconds per charge (decide, validate, explain, persist), by line_id.
     # Measurement only: never part of a decision record or its hash.
     latency_ms: dict[str, float] = field(default_factory=dict)
 
@@ -175,8 +177,11 @@ def run_org(
     rules: ChannelRules | None = None,
     cfg: EngineConfig | None = None,
     now: datetime | None = None,
+    explainer: Explainer | None = None,
 ) -> RunResult:
     rules = rules or load_rules()
+    # Explanations (D-022): template unless LLM_ENABLED; never changes a decision.
+    explainer = explainer or Explainer.from_settings(get_settings())
     cfg = cfg or load_engine_config()
     check_windows_consistent(rules, cfg)
     decided_at = now or datetime.now(UTC)
@@ -224,11 +229,13 @@ def run_org(
                         run_id,
                         decided_at,
                     )
+                    d = explainer.explain(session, d)
                     repo.insert_decision(session, d)
             except Exception as exc:  # fail open: never drop a charge
                 d = fail_open_decision(
                     charge, exc, run_id=run_id, decided_at=decided_at, rules=rules, cfg=cfg
                 )
+                d = explainer.explain(None, d)  # pending: the template, no model, no DB
                 with session.begin_nested():
                     repo.insert_decision(session, d)
                 repo.add_audit_event(

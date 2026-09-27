@@ -20,6 +20,7 @@ ALL_TABLES = [
     t.audit_events,
     t.decisions,
     t.decision_overrides,
+    t.llm_explanations,
 ]
 
 

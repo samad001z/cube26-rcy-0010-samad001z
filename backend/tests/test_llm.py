@@ -321,6 +321,19 @@ def test_disabled_explainer_never_calls_and_has_no_fallback_reason():
     assert out.model_version is None
 
 
+def test_changing_the_explanation_text_breaks_the_hash():
+    # Guardian finding 7: a mutant that always left the explanation out of the hash payload
+    # survived, because nothing edited a stored explanation and re-checked verify_hash().
+    d = _claim()
+    out = _explainer(_fixture("claim_ok")).explain(None, d)
+    assert out.verify_hash()
+    assert out.explanation is not None
+    tampered = out.model_copy(
+        update={"explanation": out.explanation.model_copy(update={"text": "a different text"})}
+    )
+    assert not tampered.verify_hash()
+
+
 def test_record_stored_before_explanations_still_verifies():
     d = _claim()  # hashed by the engine, no explanation
     # The hash a record had before the field existed: its payload had no such key at all.

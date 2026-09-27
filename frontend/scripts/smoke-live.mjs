@@ -100,6 +100,10 @@ check(tile.includes(String(listA.items.length)), "UI decisions list shows the ru
 await page.locator('a[href$="-DEMO-F01-1"]:visible').first().click();
 await page.getByRole("heading", { level: 1, name: "DEMO-F01-1" }).waitFor({ timeout: 20000 });
 check((await page.locator("main").innerText()).includes("CLAIM"), "UI opens a decision (DEMO-F01-1, CLAIM)");
+const filingRow = page.locator("li", { has: page.locator("text=within_filing_window") });
+await filingRow.getByRole("button").focus();
+await page.getByText("UNCERTAIN is not a low-confidence PASS", { exact: false }).waitFor({ timeout: 5000 });
+check(true, "UI confidence tooltip explains UNCERTAIN is not a low-confidence PASS");
 await page.getByRole("button", { name: /Sign out/ }).first().click();
 await page.waitForURL(/\/login/, { timeout: 15000 });
 check(true, "UI signs out");

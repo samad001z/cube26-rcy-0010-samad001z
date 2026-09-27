@@ -1,6 +1,8 @@
 // Plain-English names for check keys. The key itself is still shown, in small type, so a
 // reviewer can match the page to the stored record.
 
+import type { Verdict } from "@/lib/types";
+
 const NAMES: Record<string, string> = {
   // Recovery's own checks on every decision (ARCHITECTURE.md)
   unit_resolved: "The charged unit was found in upstream records",
@@ -29,3 +31,18 @@ export function checkName(key: string): string {
   return NAMES[key] ?? key.replaceAll("_", " ");
 }
 
+// What the confidence number means, by verdict. It is how deterministically the engine
+// reached THIS verdict (exact comparison or an operator's recorded check), never a chance
+// that the outcome is favourable — UNCERTAIN at 1.00 means the engine is certain it could not
+// settle the check, not that a PASS was nearly reached. See ARCHITECTURE.md "Routing
+// confidence".
+const CONFIDENCE_EXPLANATION: Record<Verdict, string> = {
+  PASS: "How certain the engine is that this check passed (an exact comparison or an operator's recorded check), not the chance the claim is later accepted.",
+  FAIL: "How certain the engine is that this check failed (an exact comparison or an operator's recorded check), not the chance the claim is later accepted.",
+  UNCERTAIN:
+    "How certain the engine is that it could not settle this check. It is not a probability that the missing answer would have been favourable: UNCERTAIN is not a low-confidence PASS.",
+};
+
+export function confidenceExplanation(verdict: Verdict): string {
+  return CONFIDENCE_EXPLANATION[verdict];
+}

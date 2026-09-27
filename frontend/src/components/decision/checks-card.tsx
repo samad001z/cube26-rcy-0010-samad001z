@@ -2,7 +2,8 @@ import { ListChecks } from "lucide-react";
 
 import { Verdict } from "@/components/status";
 import { Card, CardHeader } from "@/components/ui/card";
-import { checkName } from "@/lib/checks";
+import { Tooltip } from "@/components/ui/tooltip";
+import { checkName, confidenceExplanation } from "@/lib/checks";
 import type { Check } from "@/lib/types";
 
 export function ChecksCard({ checks }: { checks: Check[] }) {
@@ -24,8 +25,12 @@ export function ChecksCard({ checks }: { checks: Check[] }) {
             </div>
             {c.confidence && (
               <p className="col-start-2 text-xs text-muted-foreground sm:col-start-3 sm:text-right">
-                <span className="sr-only">Confidence </span>
-                <span className="num">{c.confidence}</span>
+                <Tooltip content={confidenceExplanation(c.verdict)}>
+                  <button type="button" className="rounded underline decoration-dotted underline-offset-2">
+                    <span className="sr-only">Routing confidence (not a probability of a favourable outcome): </span>
+                    <span className="num">{c.confidence}</span>
+                  </button>
+                </Tooltip>
               </p>
             )}
           </li>

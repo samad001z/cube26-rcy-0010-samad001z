@@ -385,6 +385,28 @@ def test_do_not_claim_wording_is_its_own_decision():
         validate_explanation(_model_json(ok + " A CLAIM is not possible."), tr)
 
 
+def test_id_that_is_a_prefix_of_a_real_one_is_not_accepted():
+    # Guardian finding 1: a substring check would let "DEMO-F01-1" pass against a trace
+    # that only has "DEMO-F01-12".
+    trace = {"decision": "CLAIM", "cited": [{"id": "DEMO-F01-12"}]}
+    text = "CLAIM. Evidence cited: DEMO-F01-1 supports full recovery of the stated fee amount."
+    with pytest.raises(ExplanationRejected, match="ID DEMO-F01-1 is not in the trace"):
+        validate_explanation(_model_json(text), trace)
+
+
+def test_lower_case_id_is_checked_not_silently_skipped():
+    trace = {"decision": "CLAIM", "cited": [{"id": "DEMO-F01-1"}]}
+    text = "CLAIM. Evidence cited: demo-f01-9 supports full recovery of the stated fee amount."
+    with pytest.raises(ExplanationRejected, match="ID demo-f01-9 is not in the trace"):
+        validate_explanation(_model_json(text), trace)
+
+
+def test_lower_case_id_matching_the_real_one_is_accepted():
+    trace = {"decision": "CLAIM", "cited": [{"id": "DEMO-F01-1"}]}
+    text = "CLAIM. Evidence cited: demo-f01-1 supports full recovery of the stated fee amount."
+    assert "demo-f01-1" in validate_explanation(_model_json(text), trace)
+
+
 def test_template_uses_only_trace_facts():
     tr = build_trace(_claim())
     text = template_text(tr)

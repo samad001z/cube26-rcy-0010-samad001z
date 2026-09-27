@@ -38,10 +38,11 @@ OTHER_DATE = re.compile(
     r"|\b\d{1,2}[/.]\d{1,2}[/.]\d{2,4}\b",
     re.IGNORECASE,
 )
-# DEMO-F01-1, FBA-DEMO-01, R_DUPLICATE, DO_NOT_CLAIM
-ID_SEPARATED = re.compile(r"\b[A-Z][A-Z0-9]*(?:[-_][A-Z0-9]+)+\b")
-# X00DEMO0001, B0DEMO0001: letters and digits run together
-ID_RUN = re.compile(r"\b(?=[A-Z0-9]*\d)(?=[A-Z0-9]*[A-Z])[A-Z0-9]{5,}\b")
+# DEMO-F01-1, FBA-DEMO-01, R_DUPLICATE, DO_NOT_CLAIM; matched case-insensitively so a
+# lower-case rendering of an ID (e.g. "demo-f01-1") is checked too, not silently skipped.
+ID_SEPARATED = re.compile(r"\b[A-Za-z][A-Za-z0-9]*(?:[-_][A-Za-z0-9]+)+\b")
+# X00DEMO0001, B0DEMO0001: letters and digits run together, either case.
+ID_RUN = re.compile(r"\b(?=[A-Za-z0-9]*\d)(?=[A-Za-z0-9]*[A-Za-z])[A-Za-z0-9]{5,}\b")
 SNAKE = re.compile(r"\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b")
 NUMBER = re.compile(r"\d+(?:\.\d+)?")
 DNC = re.compile(r"\bDO[ _]NOT[ _]CLAIM\b")
@@ -97,6 +98,13 @@ def validate_explanation(raw: str, trace: dict[str, Any]) -> str:
         )
 
     source = corpus(trace)
+    # Whole-token sets, not the raw corpus string: a substring check would let "DEMO-F01-1"
+    # pass against a trace that only has "DEMO-F01-12", or "R_CONTRADICTED" against
+    # "R_CONTRADICTED_FULL". IDs are folded to upper case so a lower-case rendering is
+    # still checked, not skipped.
+    id_tokens = {m.upper() for m in ID_SEPARATED.findall(source)}
+    id_tokens |= {m.upper() for m in ID_RUN.findall(source)}
+    name_tokens = set(SNAKE.findall(source))
     rest = text
     for m in ISO_DATE.findall(rest):
         if m not in source:
@@ -107,10 +115,16 @@ def validate_explanation(raw: str, trace: dict[str, Any]) -> str:
         raise ExplanationRejected(f"date written as {other.group(0)!r}, not YYYY-MM-DD")
 
     decision_value = DNC.sub(" ", rest)  # "DO NOT CLAIM" is a phrase, not an ID
-    for pattern, kind in ((ID_SEPARATED, "ID"), (ID_RUN, "ID"), (SNAKE, "name")):
+    # SNAKE first: it only matches all-lower-case, underscore-only tokens, so it claims
+    # genuine snake_case names before the now case-insensitive ID_SEPARATED can.
+    for m in SNAKE.findall(decision_value):
+        if m not in name_tokens and m.upper() not in id_tokens:
+            raise ExplanationRejected(f"name {m} is not in the trace")
+    decision_value = SNAKE.sub(" ", decision_value)
+    for pattern in (ID_SEPARATED, ID_RUN):
         for m in pattern.findall(decision_value):
-            if m not in source:
-                raise ExplanationRejected(f"{kind} {m} is not in the trace")
+            if m.upper() not in id_tokens:
+                raise ExplanationRejected(f"ID {m} is not in the trace")
         decision_value = pattern.sub(" ", decision_value)
 
     numbers = set(NUMBER.findall(source))

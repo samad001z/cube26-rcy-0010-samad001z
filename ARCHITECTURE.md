@@ -1,6 +1,6 @@
 # Architecture
 
-Status: partial. This file covers the decision path (Day 2), the API and the eval harness (Day 3), and human review and overrides (Day 4). Deployment and the LLM layer are added on later days.
+Status: partial. This file covers the decision path (Day 2), the API and the eval harness (Day 3), human review and overrides (Day 4), and model explanations (Day 5). Deployment is described in DEPLOY.md.
 
 ## Decision path (one organisation, one run)
 
@@ -100,7 +100,7 @@ The decision's routing confidence is the confidence of its rule's key check (tab
 
 ## Decision record
 
-Contract fields (`record_id`, `schema_version` = `recovery_v1`, `organization_id`, `client_id`, `agent` = `recovery`, `subject`, `captured_at`, `checks`, `outcome` {decision, decided_by = `rules@<engine_version>`, decided_at}, `overrides`, `status`, `content_hash`), plus: `decision`, `evidence_status`, `reason_code`, `rule_id`, `rule_path`, `reason`, `warnings`, `next_action`, `confidence`, `coverage`, `amount_charged`, `amount_reimbursed`, `claim` {amount, currency, computation lines}, `citations` [{kind, id, content_hash, role, check_keys}], `evidence_considered` (every record read, usable or not, and why), `resolved_unit`, `engine_version`, `rules_hash`, `config_hash`, `model_version` (null: no model is used).
+Contract fields (`record_id`, `schema_version` = `recovery_v1`, `organization_id`, `client_id`, `agent` = `recovery`, `subject`, `captured_at`, `checks`, `outcome` {decision, decided_by = `rules@<engine_version>`, decided_at}, `overrides`, `status`, `content_hash`), plus: `decision`, `evidence_status`, `reason_code`, `rule_id`, `rule_path`, `reason`, `warnings`, `next_action`, `confidence`, `coverage`, `amount_charged`, `amount_reimbursed`, `claim` {amount, currency, computation lines}, `citations` [{kind, id, content_hash, role, check_keys}], `evidence_considered` (every record read, usable or not, and why), `resolved_unit`, `engine_version`, `rules_hash`, `config_hash`, `model_version` (the model id when a model's explanation text is used, else null), `explanation` (see Model usage).
 
 `content_hash` is sha256 over canonical JSON of the record (sorted keys, Decimals as strings, no floats). Decisions and audit events are append-only for the application role (SELECT and INSERT only); the owner role can still modify rows, so append-only holds at the application role level only.
 
@@ -169,6 +169,47 @@ decisions list (equal-weight CLAIM / DO NOT CLAIM / REVIEW totals, filters); the
 detail in plain English; the override form with a mandatory reason and the saved history.
 The UI computes no decision, amount or citation. `make review-ui` starts it against the
 local API with dev-only keys.
+
+## Model usage (D-022)
+
+The model explains decisions; it never makes them. The rule engine decides, the citation
+validator checks the decision, and only then is an explanation added and the record hashed
+and stored.
+
+```
+decide -> validate citations -> explain -> hash -> store
+                                   |
+         LLM_ENABLED=false, pending record, bad config ---------------> template
+         cache hit (org, trace hash) -> validate again ---------------> model text (cached)
+         one call to Gemini on Vertex AI -> validate against trace --> model text
+                                   | any failure -----------------------> template + fallback_reason
+```
+
+- **Trace** (`app/llm/trace.py`): line, unit, charge type, decision, evidence status, rule,
+  reason, next action, warnings, amounts, claim computation, routing confidence, coverage,
+  checks, citations and the records read. Run-specific IDs are left out so re-runs hit the
+  cache.
+- **Provider** (`app/llm/client.py`, `app/llm/vertex.py`): `google-genai` with
+  `vertexai=True`; project, location and model from the environment; temperature 0; JSON
+  output with one `explanation` field; one attempt with a timeout; no tools. Only Vertex is
+  implemented.
+- **Validation** (`app/llm/validate.py`): every ID, snake_case name, ISO date and number in
+  the text must be in the trace; no date in another form; the decision word in capitals must
+  be the record's own and no other; no link; no forbidden phrase. It does not check the
+  meaning of the wording between those facts.
+- **Template** (`app/llm/template.py`): the decision, the engine's reason, the claim amount,
+  the cited records and the next action, assembled by code. It is what the UI labels
+  "Standard explanation".
+- **Recorded**: source, model id, prompt version, trace hash, cached, latency, input and
+  output tokens (thinking included), cost estimate from operator prices, fallback reason.
+  The explanation is inside the content hash; an empty one is left out so older records
+  still verify.
+- **Cache**: `llm_explanations`, forced RLS, append-only for the app role.
+- **Cost and latency**: one call per non-pending decision on the first run of a trace,
+  none on a re-run. Calls are made one after another, so a run with the model on takes
+  roughly the model latency times the number of new traces.
+- `make llm-smoke` sends one real trace and prints the explanation, latency, tokens and
+  cost, or says that it fell back and why.
 
 ## Evaluation harness
 

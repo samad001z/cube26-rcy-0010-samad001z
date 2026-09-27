@@ -54,6 +54,42 @@ report the demo run also contains those lines. For a demo-only run, run `make de
 database before `make review-ui` (which then skips the sample for `org_demo_alpha`, since it
 already has a run).
 
+### Model explanations (optional)
+
+Every decision carries a short explanation. With `LLM_ENABLED=false` (the default) it is the
+standard one, built by code from the decision. With it on, Gemini on Vertex AI writes it from
+the decision's trace; the text is kept only if every ID, amount and date in it is in the
+trace, else the standard one is used and the reason is recorded. The model never makes or
+changes a decision (D-022, ARCHITECTURE.md "Model usage").
+
+To try it locally:
+
+1. Pick a model. In the Google Cloud console, open **Vertex AI → Model Garden** for your
+   project, filter to Gemini, and choose one that is available in your region. Its model ID
+   is what goes in `LLM_MODEL`. Nothing in the code names a model.
+2. Authenticate. Either `gcloud auth application-default login` (your own account needs
+   the Vertex AI User role on the project), or a service-account key file kept **outside
+   this repository**, for example `~/.config/alibi/vertex-dev.json`, named by
+   `GOOGLE_APPLICATION_CREDENTIALS`. A path inside the repository is refused, and key files
+   are git-ignored and blocked by `make check-keys` in CI.
+3. Set in `.env`: `LLM_PROVIDER=vertex`, `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`,
+   `LLM_MODEL`, and optionally the two `LLM_PRICE_*_USD_PER_MTOK` values from the Vertex AI
+   pricing page for that model (without them no cost is estimated).
+4. Check it with one real call:
+
+   ```bash
+   make demo          # a run to explain
+   make llm-smoke     # [LINE=DEMO-F01-1]
+   ```
+
+   It prints the model, latency, tokens, cost and the explanation, then either
+   `MODEL EXPLANATION USED` (exit 0) or `FELL BACK TO TEMPLATE: <reason>` (exit 3). A
+   "not found" or permission error in the reason usually means the model is not available
+   in that project and region, or the account lacks access.
+5. Set `LLM_ENABLED=true` to explain every decision of a run. Tests never call the model.
+
+In production the API uses its Cloud Run service identity, with no key file (DEPLOY.md).
+
 ---
 
 ## Your problem statement: Recovery Manager

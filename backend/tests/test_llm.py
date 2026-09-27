@@ -176,6 +176,29 @@ def test_vertex_client_uses_vertexai_project_location_timeout_and_no_retries(mon
     assert seen["http_options"].retry_options.attempts == 1
 
 
+def test_vertex_client_uses_the_key_files_credentials(monkeypatch, tmp_path):
+    # Guardian finding 10: a mutant that silently ignored the key file and fell back to
+    # other credentials (Application Default Credentials) survived.
+    from google.oauth2 import service_account
+
+    key_file = tmp_path / "key.json"
+    key_file.write_text("{}")
+    sentinel = object()
+
+    def fake_from_file(filename: str, scopes: list[str] | None = None) -> object:
+        assert filename == str(key_file)
+        assert scopes == vertex.SCOPES
+        return sentinel
+
+    monkeypatch.setattr(
+        service_account.Credentials, "from_service_account_file", staticmethod(fake_from_file)
+    )
+    seen: dict[str, Any] = {}
+    monkeypatch.setattr(genai, "Client", lambda **kw: seen.update(kw) or object())
+    vertex._client(_cfg(credentials_file=key_file))
+    assert seen["credentials"] is sentinel
+
+
 def test_vertex_request_uses_configured_model_json_and_temperature_zero():
     fake = FakeClient(_fixture("claim_ok"))
     p = vertex.VertexProvider(_cfg(max_output_tokens=321), client=fake)

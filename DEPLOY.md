@@ -152,7 +152,7 @@ API_URL="$API_URL" UI_URL=https://<your-vercel-domain> \
 ALPHA_KEY=<alpha key> BRAVO_KEY=<bravo key> bin/smoke-live
 ```
 
-It stops at the first failure and ends with `all 23 checks passed` when:
+It stops at the first failure and ends with `all 24 checks passed` when:
 
 - the API is healthy with its database;
 - keys map to their organisations, and a wrong key or no key gets 401;
@@ -161,7 +161,11 @@ It stops at the first failure and ends with `all 23 checks passed` when:
   decision IDs;
 - in the UI, sign-in refuses a wrong key and accepts alpha's, the top bar names the
   organisation, the key cookie is invisible to page scripts, the list and a decision
-  open, sign-out works, and no page error is raised.
+  open, the confidence tooltip on an UNCERTAIN check explains itself, sign-out works, and no
+  page error is raised.
+
+(`docs/deploy/smoke-live-2026-09-27.txt` shows 23/23: it was captured before the confidence-
+tooltip check was added later the same day.)
 
 ## 7. Model access (Vertex AI)
 

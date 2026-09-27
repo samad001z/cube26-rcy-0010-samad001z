@@ -33,6 +33,11 @@ make demo                      # CLI: decide the demo report for org_demo_alpha,
 
 or, in the review UI, sign in as `org_demo_alpha` and choose **Run a report → Load demo data**.
 
+A run decides every charge stored for the organisation, not only the last upload. On a
+database where `org_demo_alpha` already has the sample report (`make review-ui` loads it), the
+demo run also contains those 40 sample lines. For a run with only the demo lines, use a fresh
+database. `demo/check.sh` looks at the `DEMO-` lines only and says how many others were decided.
+
 `demo/check.sh` compares the run with the table above and exits 1 on any difference, so a
 change in the engine that moves a demo line shows up here. It is a check on the demo, not a
 test of the engine and not an accuracy measure.

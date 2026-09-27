@@ -26,7 +26,14 @@ EXPECTED = {
 }
 
 records = json.load(open(sys.argv[1]))
-got = {r["subject"]["line_id"]: (r["decision"], r["rule_id"]) for r in records}
+# A run decides every charge stored for the organisation, so lines loaded earlier (the
+# sample data, say) are in it too. Only the demo lines are checked.
+got = {
+    r["subject"]["line_id"]: (r["decision"], r["rule_id"])
+    for r in records
+    if r["subject"]["line_id"].startswith("DEMO-")
+}
+others = len(records) - len(got)
 problems = [
     f"{line}: expected {want[0]} {want[1]}, got {' '.join(got[line]) if line in got else 'no decision'}"
     for line, want in EXPECTED.items()
@@ -38,6 +45,8 @@ print(
     f"demo: {len(got)} lines = {counts['CLAIM']} CLAIM, "
     f"{counts['DO_NOT_CLAIM']} DO_NOT_CLAIM, {counts['REVIEW']} REVIEW"
 )
+if others:
+    print(f"  ({others} other line(s) stored for this organisation were decided in the same run)")
 for line in sorted(got):
     print(f"  {line:<11} {got[line][0]:<13} {got[line][1]}")
 if counts["CLAIM"] < 3 or counts["DO_NOT_CLAIM"] < 2 or counts["REVIEW"] < 1:

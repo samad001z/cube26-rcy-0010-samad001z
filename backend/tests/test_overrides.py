@@ -85,6 +85,13 @@ def test_override_is_stored_and_the_engine_row_is_unchanged(app_engine, loaded):
     assert eff.verify_hash() and eff.content_hash != d.content_hash
     # Rule-level fields stay the engine's: the reviewer changed the outcome, not the trace.
     assert (eff.rule_id, eff.reason, eff.citations) == (d.rule_id, d.reason, d.citations)
+    # Guardian finding 5: the effective record's own explanation and model_version, not the
+    # engine's (a human DO NOT CLAIM must never show text starting with the engine's REVIEW).
+    assert eff.model_version is None
+    assert eff.explanation is not None
+    assert eff.explanation.text.startswith("DO_NOT_CLAIM.")
+    assert eff.explanation.source == "template"
+    assert "asha" in eff.explanation.text
     with org_session(app_engine, org) as s:
         stored = repo.get_decision(s, d.record_id)
         events: Sequence[Any] = (

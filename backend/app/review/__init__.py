@@ -42,7 +42,7 @@ from app.core.hashing import content_hash
 from app.core.rules import ChannelRules, EngineConfig, load_engine_config, load_rules
 from app.db import repo
 from app.models.contract import Check, Outcome, Override
-from app.models.decision import Claim, DecisionRecord
+from app.models.decision import Claim, DecisionRecord, Explanation
 from app.models.vocab import Decision, RecordStatus, ReportType, Verdict
 from app.pipeline import DbLookup
 from app.precheck import run_prechecks
@@ -110,6 +110,25 @@ def effective_decision(engine: DecisionRecord, overrides: list[OverrideRecord]) 
     return Decision(overrides[-1].override.new_decision) if overrides else engine.decision
 
 
+def _override_explanation(
+    engine: DecisionRecord, new: Decision, last: "OverrideRecord"
+) -> Explanation:
+    """The engine's explanation describes the engine's own decision, which an override may
+    no longer match (a human DO NOT CLAIM could otherwise show text starting "REVIEW.").
+    Never a model output, so this always carries the reviewer's own words, not the model's."""
+    prior = engine.explanation
+    return Explanation(
+        text=(
+            f"{new.value}. Overridden by {HUMAN_PREFIX}{last.override.reviewer}: "
+            f"{last.override.reason}"
+        ),
+        source="template",
+        prompt_version=prior.prompt_version if prior else "override",
+        trace_hash=prior.trace_hash if prior else "",
+        fallback_reason="explanation replaced by a human override; see the override reason",
+    )
+
+
 def effective_record(engine: DecisionRecord, overrides: list[OverrideRecord]) -> DecisionRecord:
     """The engine record as a reviewer left it. Unchanged when there is no override."""
     if not overrides:
@@ -127,6 +146,10 @@ def effective_record(engine: DecisionRecord, overrides: list[OverrideRecord]) ->
                 decided_at=last.override.at,
             ),
             "claim": last.claim if new == Decision.CLAIM else None,
+            # The engine's explanation and model_version describe the engine's own decision,
+            # not the override (guardian finding 5): replace both.
+            "explanation": _override_explanation(engine, new, last),
+            "model_version": None,
         }
     ).with_hash()
 

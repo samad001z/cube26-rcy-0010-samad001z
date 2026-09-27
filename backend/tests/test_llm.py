@@ -446,6 +446,59 @@ def test_lower_case_do_not_claim_wording_on_a_claim_record_is_rejected():
         validate_explanation(_model_json(text), tr)
 
 
+@pytest.mark.parametrize(
+    ("suffix", "why"),
+    [
+        (" It costs $2.00.", "currency symbol"),
+        (" It costs €2.00.", "currency symbol"),
+        (" Also 2.00 EUR was considered.", "currency EUR"),
+        (" This is worth 50%.", "percentage"),
+        (" It can be claimed twice.", "number word"),
+    ],
+)
+def test_currency_and_number_word_wording_is_rejected(suffix, why):
+    with pytest.raises(ExplanationRejected, match=why):
+        validate_explanation(_model_json(GOOD + suffix), build_trace(_claim()))
+
+
+def test_negative_number_is_rejected_but_a_hyphenated_id_is_not():
+    with pytest.raises(ExplanationRejected, match="negative number"):
+        validate_explanation(_model_json(GOOD + " A separate loss of -6.25 was noted."), TRACE)
+    # PRP-1 in GOOD is a real ID, not a negative number: it must still pass.
+    assert validate_explanation(_model_json(GOOD), TRACE) == GOOD
+
+
+def test_amount_near_claim_must_be_the_claim_amount_not_some_other_trace_figure():
+    # Guardian finding 6: "claim amount 12.50" passed when 12.50 was really the charge, not
+    # the claim, because no check tied a number to what it claimed to be.
+    d = _claim()
+    tr = build_trace(d)
+    assert tr["claim"] is not None and tr["claim"]["amount"] == "2.00"
+    text = (
+        "CLAIM. Prep record PRP-1 shows fnsku_label_placement and original_barcode_covered "
+        "passed before the fee on L-1 was posted. The claim amount is 2.00 USD, the same as "
+        "the fee charged."
+    )
+    # 2.00 is also the charge amount here, so this legitimate wording still passes.
+    assert validate_explanation(_model_json(text), tr) == text
+    bad = text.replace("The claim amount is 2.00", "The claim amount is 12.50")
+    with pytest.raises(ExplanationRejected, match="is not the claim amount"):
+        validate_explanation(_model_json(bad), tr)
+
+
+def test_id_run_pattern_is_case_insensitive_and_exact():
+    # Guardian finding 6: a mutant disabling the check on single-run alphanumeric IDs
+    # (X00DEMO0001-style) survived because nothing exercised it.
+    trace = {"decision": "CLAIM", "cited": [{"id": "X00DEMO0001"}]}
+    good = "CLAIM. Evidence cited: X00DEMO0001 supports full recovery of the stated fee amount."
+    assert validate_explanation(_model_json(good), trace) == good
+    lower = "CLAIM. Evidence cited: x00demo0001 supports full recovery of the stated fee amount."
+    assert "x00demo0001" in validate_explanation(_model_json(lower), trace)
+    wrong = "CLAIM. Evidence cited: X00DEMO0002 supports full recovery of the stated fee amount."
+    with pytest.raises(ExplanationRejected, match="ID X00DEMO0002 is not in the trace"):
+        validate_explanation(_model_json(wrong), trace)
+
+
 def test_template_uses_only_trace_facts():
     tr = build_trace(_claim())
     text = template_text(tr)

@@ -8,6 +8,9 @@ Accepted only if:
   - the only decision word in capitals is the record's own decision, and it is there;
   - it contains no phrasing, in any case, that argues for a different decision (e.g.
     "you should claim the fee now" on a REVIEW record);
+  - it has no currency symbol, no currency code other than the trace's own, no percentage,
+    no number word ("twice", "half", ...) and no negative number;
+  - the figure nearest the word "claim" is the claim amount itself, not some other number;
   - it has no link and none of the forbidden phrases (CLAUDE.md).
 """
 
@@ -47,6 +50,21 @@ ID_SEPARATED = re.compile(r"\b[A-Za-z][A-Za-z0-9]*(?:[-_][A-Za-z0-9]+)+\b")
 ID_RUN = re.compile(r"\b(?=[A-Za-z0-9]*\d)(?=[A-Za-z0-9]*[A-Za-z])[A-Za-z0-9]{5,}\b")
 SNAKE = re.compile(r"\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b")
 NUMBER = re.compile(r"\d+(?:\.\d+)?")
+# A minus not glued to a letter or digit before it, so a hyphenated ID like "PRP-1" is not
+# mistaken for a negative number.
+NEGATIVE_NUMBER = re.compile(r"(?<![A-Za-z0-9])-\s?\d+(?:\.\d+)?")
+CURRENCY_SYMBOL = re.compile(r"[$€£¥]")
+KNOWN_CURRENCY_CODES = ("USD", "EUR", "GBP", "JPY", "CAD", "AUD", "CHF", "CNY", "INR", "MXN")
+CURRENCY_CODE = re.compile(r"\b(?:" + "|".join(KNOWN_CURRENCY_CODES) + r")\b")
+PERCENT = re.compile(r"\d\s*%")
+NUMBER_WORD = re.compile(
+    r"\b(?:once|twice|thrice|double|triple|quadruple|half|quarter|dozen)\b", re.IGNORECASE
+)
+# "claim amount 12.50" when 12.50 is really the charge: the number nearest "claim" must be
+# the claim amount itself, not any other figure in the trace. The gap excludes sentence
+# punctuation, so this does not reach into an unrelated later sentence, and hyphens, so it
+# does not reach past a hyphenated ID (e.g. "claimed for L-1") into the ID's own digits.
+CLAIM_AMOUNT_NEAR = re.compile(r"\bclaim\w*\b[^.?!\d-]{0,40}?(\d+(?:\.\d+)?)", re.IGNORECASE)
 DNC = re.compile(r"\bDO[ _]NOT[ _]CLAIM\b")
 CLAIM = re.compile(r"\bCLAIM\b")
 REVIEW = re.compile(r"\bREVIEW\b")
@@ -146,6 +164,22 @@ def validate_explanation(raw: str, trace: dict[str, Any]) -> str:
         raise ExplanationRejected(
             f"wording argues for {sorted(other_signals)}, not the decision {trace['decision']}"
         )
+
+    if CURRENCY_SYMBOL.search(text):
+        raise ExplanationRejected("contains a currency symbol; write amounts as in the trace")
+    for code in CURRENCY_CODE.findall(text):
+        if code != trace.get("currency"):
+            raise ExplanationRejected(f"currency {code} is not the trace's currency")
+    if PERCENT.search(text):
+        raise ExplanationRejected("contains a percentage, which is not in the trace")
+    if NUMBER_WORD.search(text):
+        raise ExplanationRejected("contains a number word instead of a figure from the trace")
+    if NEGATIVE_NUMBER.search(text):
+        raise ExplanationRejected("contains a negative number, which is not in the trace")
+    claim_amount = trace["claim"]["amount"] if trace.get("claim") else None
+    for m in CLAIM_AMOUNT_NEAR.findall(text):
+        if m != claim_amount:
+            raise ExplanationRejected(f'the amount near "claim" ({m}) is not the claim amount')
 
     source = corpus(trace)
     # Whole-token sets, not the raw corpus string: a substring check would let "DEMO-F01-1"

@@ -6,13 +6,13 @@
 #   deploy/cloudrun.sh deploy    build the image with Cloud Build and deploy a new revision
 #   deploy/cloudrun.sh url       print the service URL
 #
-# Settings (environment, with defaults): PROJECT=bytesofjoy-501900 REGION=asia-south1
+# Settings (environment, with defaults): PROJECT=bytesofjoy-501900 REGION=australia-southeast1
 # SERVICE=alibi-api REPO=alibi. DRY_RUN=1 prints the commands instead of running them.
 # No secret value is ever passed on a command line or printed.
 set -euo pipefail
 
 PROJECT="${PROJECT:-bytesofjoy-501900}"
-REGION="${REGION:-asia-south1}"
+REGION="${REGION:-australia-southeast1}"
 SERVICE="${SERVICE:-alibi-api}"
 REPO="${REPO:-alibi}"
 SA_NAME="${SA_NAME:-alibi-api}"

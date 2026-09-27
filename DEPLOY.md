@@ -6,7 +6,7 @@ repository or an image: database URLs, the attachment secret and the API key has
 in Secret Manager; model access comes from the Cloud Run service identity.
 
 ```
-browser ──> Vercel (Next.js UI, bom1) ──X-API-Key──> Cloud Run alibi-api (asia-south1)
+browser ──> Vercel (Next.js UI, syd1) ──X-API-Key──> Cloud Run alibi-api (australia-southeast1)
                                                         │  Secret Manager: DATABASE_URL,
                                                         │  ATTACHMENT_KEY_SECRET, ALIBI_API_KEYS
                                                         ├──> Supabase Postgres (schema alibi,
@@ -15,16 +15,17 @@ browser ──> Vercel (Next.js UI, bom1) ──X-API-Key──> Cloud Run alibi
 ```
 
 Do the steps in order the first time. Every command runs from the repository root on your
-machine, with `gcloud`, `psql`, `uv` and Node installed. Regions: Cloud Run `asia-south1`
-and Supabase `ap-south-1` (both Mumbai), Vercel functions `bom1`. Change them together.
+machine, with `gcloud`, `psql`, `uv` and Node installed. Regions: Cloud Run
+`australia-southeast1` and Supabase `ap-southeast-2` (both Sydney), Vercel functions
+`syd1`. Change them together.
 
 ## 1. Supabase: project, roles and schema
 
-1. Create a Supabase project in region **South Asia (Mumbai)**. Keep the database password
+1. Create a Supabase project in region **Oceania (Sydney)**. Keep the database password
    of the `postgres` user in your password manager.
 2. **Project Settings → Database → SSL Configuration**: turn on *Enforce SSL on incoming
    connections*.
-3. **Connect → Session pooler**: note the host (`aws-0-ap-south-1.pooler.supabase.com`,
+3. **Connect → Session pooler**: note the host (`aws-0-ap-southeast-2.pooler.supabase.com`,
    port `5432`) and your project ref. Through the pooler the user name is
    `<role>.<project-ref>`. Use the session pooler: the direct host is IPv6-only unless the
    project has the IPv4 add-on, and Cloud Run's default egress is IPv4; the transaction
@@ -34,7 +35,7 @@ and Supabase `ap-south-1` (both Mumbai), Vercel functions `bom1`. Change them to
 
    ```bash
    export SUPA_REF=<project-ref>
-   export SUPA_HOST=aws-0-ap-south-1.pooler.supabase.com
+   export SUPA_HOST=aws-0-ap-southeast-2.pooler.supabase.com
    export ALIBI_OWNER_PASSWORD="$(openssl rand -hex 24)"   # keep both in your password manager
    export ALIBI_APP_PASSWORD="$(openssl rand -hex 24)"
    psql "postgresql://postgres.$SUPA_REF@$SUPA_HOST:5432/postgres?sslmode=require" \
@@ -127,13 +128,13 @@ Cloud Run refuses HTTP/1 request bodies over 32 MiB, which bounds uploads to `PO
 (an open issue from Day 3). The first request after idle starts an instance and takes a
 few seconds; `--min-instances 1` avoids that at a cost.
 
-Rollback: `gcloud run services update-traffic alibi-api --region asia-south1
+Rollback: `gcloud run services update-traffic alibi-api --region australia-southeast1
 --to-revisions <previous-revision>=100`.
 
 ## 5. Vercel: the review UI
 
 1. Import the repository in Vercel. **Root Directory: `frontend`**. `frontend/vercel.json`
-   sets the framework (Next.js), `npm ci`, `npm run build` and region `bom1`.
+   sets the framework (Next.js), `npm ci`, `npm run build` and region `syd1`.
 2. **Settings → Build and Deployment**: Node.js 22.x, and keep *Include files outside the
    root directory in the Build Step* **on**. The prebuild step copies `../demo` into
    `frontend/demo-data/` for "Load demo data" and fails the build if it cannot.

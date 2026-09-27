@@ -15,17 +15,21 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import Engine
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session
 
 from app.api.agent import db_engine
 from app.api.auth import require_org
+from app.core.rules import load_engine_config
 from app.db import repo
 from app.db.session import org_session
 from app.models.decision import DecisionRecord
 from app.review import (
     OverrideError,
+    OverrideRecord,
     OverrideRequest,
     apply_override,
     check_chain,
+    claim_refusal,
     effective_record,
 )
 
@@ -41,7 +45,10 @@ def _unavailable(exc: SQLAlchemyError) -> HTTPException:
     )
 
 
-def _summary(engine_rec: DecisionRecord, eff: DecisionRecord, n_overrides: int) -> dict[str, Any]:
+def _summary(
+    engine_rec: DecisionRecord, overrides: list[OverrideRecord], problems: list[str]
+) -> dict[str, Any]:
+    eff = effective_record(engine_rec, overrides)
     s = eff.subject
     return {
         "record_id": eff.record_id,
@@ -61,8 +68,29 @@ def _summary(engine_rec: DecisionRecord, eff: DecisionRecord, n_overrides: int) 
         "rule_id": eff.rule_id,
         "confidence": str(eff.confidence),
         "claim_amount": str(eff.claim.amount) if eff.claim else None,
-        "override_count": n_overrides,
+        "override_count": len(overrides),
+        "integrity_problems": problems,
         "reason": eff.reason,
+    }
+
+
+def _problems(session: Session, rec: DecisionRecord, overrides: list[OverrideRecord]) -> list[str]:
+    if not overrides:
+        return check_chain(rec, overrides)
+    return check_chain(rec, overrides) + repo.override_column_problems(session, rec.record_id)
+
+
+def _earlier_override(o: OverrideRecord | None, current_record_id: str) -> dict[str, Any] | None:
+    """A human override of the same charge line made on an earlier run. Overrides attach to
+    one decision, so a re-run does not carry it; the list shows it so it is never hidden."""
+    if o is None or o.decision_record_id == current_record_id:
+        return None
+    return {
+        "record_id": o.decision_record_id,
+        "decision": o.override.new_decision,
+        "reviewer": o.override.reviewer,
+        "at": o.override.at.isoformat(),
+        "reason": o.override.reason,
     }
 
 
@@ -99,12 +127,17 @@ def list_decisions(
                 raise HTTPException(status.HTTP_404_NOT_FOUND, f"no run {run_id!r}")
             decisions = repo.list_decisions(session, run.run_id)
             overrides = repo.overrides_by_record(session, [d.record_id for d in decisions])
+            newest = repo.newest_override_by_line(session, [d.subject.line_id for d in decisions])
+            items = []
+            for d in decisions:
+                ovs = overrides.get(d.record_id, [])
+                item = _summary(d, ovs, _problems(session, d, ovs))
+                item["earlier_override"] = _earlier_override(
+                    newest.get(d.subject.line_id), d.record_id
+                )
+                items.append(item)
     except SQLAlchemyError as exc:
         raise _unavailable(exc) from None
-    items = []
-    for d in decisions:
-        ovs = overrides.get(d.record_id, [])
-        items.append(_summary(d, effective_record(d, ovs), len(ovs)))
     return {
         "run": {
             "run_id": run.run_id,
@@ -149,16 +182,23 @@ def get_decision(record_id: str, org: Org, engine: Db) -> dict[str, Any]:
                     }
                 )
             history = []
-            for d in repo.list_decisions_for_line(session, rec.subject.line_id):
+            line_decisions = repo.list_decisions_for_line(session, rec.subject.line_id)
+            for d in line_decisions:
                 ovs = repo.list_overrides(session, d.record_id)
-                history.append(_summary(d, effective_record(d, ovs), len(ovs)))
+                history.append(_summary(d, ovs, _problems(session, d, ovs)))
+            problems = _problems(session, rec, overrides)
+            is_newest = line_decisions[-1].record_id == rec.record_id
+            claim_blocked = claim_refusal(rec, load_engine_config())
     except SQLAlchemyError as exc:
         raise _unavailable(exc) from None
     return {
         "record": effective_record(rec, overrides).model_dump(mode="json"),
         "engine_record": rec.model_dump(mode="json"),
         "overrides": [o.model_dump(mode="json") for o in overrides],
-        "integrity_problems": check_chain(rec, overrides),
+        "integrity_problems": problems,
+        # Whether the override form may be used, and why CLAIM is not offered (D-021).
+        "overridable": is_newest,
+        "claim_refusal": claim_blocked,
         "charge": charge.model_dump(mode="json") if charge else None,
         "evidence": evidence,
         "line_history": history,

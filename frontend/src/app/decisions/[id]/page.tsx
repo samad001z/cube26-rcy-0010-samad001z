@@ -197,7 +197,18 @@ export default async function DecisionPage({ params }: PageProps<"/decisions/[id
           </Card>
 
           <Card title="Override">
-            <OverrideForm recordId={r.record_id} current={r.decision} pending={r.status === "pending"} blocked={d.integrity_problems.length > 0} />
+            <OverrideForm
+              recordId={r.record_id}
+              current={r.decision}
+              claimRefusal={d.claim_refusal}
+              blocked={
+                d.integrity_problems.length > 0
+                  ? "Overrides are blocked: the stored history does not verify."
+                  : !d.overridable
+                    ? "A newer run decided this charge line. Override the newest decision; this one is kept as history."
+                    : null
+              }
+            />
             {d.overrides.length > 0 && (
               <ol className="mt-4 space-y-3 border-t border-line pt-3">
                 {[...d.overrides].reverse().map((o) => (

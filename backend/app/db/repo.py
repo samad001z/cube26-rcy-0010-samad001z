@@ -328,6 +328,57 @@ def list_overrides(session: Session, record_id: str) -> list["OverrideRecord"]:
     return [OverrideRecord.model_validate(b) for b in bodies]
 
 
+def newest_override_by_line(
+    session: Session, line_ids: Sequence[str]
+) -> dict[str, "OverrideRecord"]:
+    """For each charge line, the newest override on any of its decisions (any run)."""
+    from app.review import OverrideRecord
+
+    o, d = t.decision_overrides.c, t.decisions.c
+    out: dict[str, OverrideRecord] = {}
+    if not line_ids:
+        return out
+    rows = session.execute(
+        sa.select(o.line_id, o.body)
+        .join(
+            t.decisions,
+            sa.and_(d.organization_id == o.organization_id, d.record_id == o.decision_record_id),
+        )
+        .where(o.line_id.in_(list(line_ids)))
+        .order_by(o.line_id, d.decided_at, d.record_id, o.sequence)
+    ).all()
+    for r in rows:
+        out[r.line_id] = OverrideRecord.model_validate(r.body)
+    return out
+
+
+def override_column_problems(session: Session, record_id: str) -> list[str]:
+    """Override rows whose indexed columns disagree with the body the effective decision is
+    built from. The database constraints check the columns; this ties them to the body."""
+    o = t.decision_overrides.c
+    body = o.body
+    claim_in_body = body["claim"]["amount"].astext.cast(sa.Numeric(12, 2))
+    mismatch = sa.or_(
+        o.sequence != body["sequence"].astext.cast(sa.Integer),
+        o.original_decision != body["override"]["original_decision"].astext,
+        o.new_decision != body["override"]["new_decision"].astext,
+        o.reason != body["override"]["reason"].astext,
+        o.reviewer != body["override"]["reviewer"].astext,
+        o.content_hash.is_distinct_from(body["content_hash"].astext),
+        o.claim_amount.is_distinct_from(claim_in_body),
+    )
+    seqs: Sequence[int] = (
+        session.execute(
+            sa.select(o.sequence)
+            .where(o.decision_record_id == record_id, mismatch)
+            .order_by(o.sequence)
+        )
+        .scalars()
+        .all()
+    )
+    return [f"override {s}: stored columns do not match its body" for s in seqs]
+
+
 def overrides_by_record(
     session: Session, record_ids: Sequence[str]
 ) -> dict[str, list["OverrideRecord"]]:

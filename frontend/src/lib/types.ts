@@ -31,6 +31,17 @@ export interface DecisionSummary {
   confidence: string;
   claim_amount: string | null;
   override_count: number;
+  integrity_problems: string[];
+  earlier_override?: EarlierOverride | null;
+  reason: string;
+}
+
+/** A human override of the same charge line made on an earlier run (not carried over). */
+export interface EarlierOverride {
+  record_id: string;
+  decision: DecisionValue;
+  reviewer: string;
+  at: string;
   reason: string;
 }
 
@@ -148,6 +159,10 @@ export interface DecisionDetail {
   engine_record: DecisionRecord;
   overrides: OverrideRecord[];
   integrity_problems: string[];
+  /** false when a newer run decided this charge line: older runs are history. */
+  overridable: boolean;
+  /** Why CLAIM is not offered for this record, or null when it may be chosen. */
+  claim_refusal: string | null;
   charge: Record<string, unknown> | null;
   evidence: EvidenceItem[];
   line_history: DecisionSummary[];

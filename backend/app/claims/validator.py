@@ -41,8 +41,15 @@ class Lookup(Protocol):
 
 
 def validate(
-    decision: DecisionRecord, charge: Charge, lookup: Lookup, cfg: EngineConfig
+    decision: DecisionRecord,
+    charge: Charge,
+    lookup: Lookup,
+    cfg: EngineConfig,
+    *,
+    human_override: bool = False,
 ) -> list[str]:
+    """`human_override`: the CLAIM was set by a reviewer (D-021), whose stored reason stands
+    in for citing contradicting evidence. Every other check still applies."""
     errors: list[str] = []
     org = decision.organization_id
     if charge.organization_id != org:
@@ -106,7 +113,9 @@ def validate(
                 errors.append(f"claim amount {claim.amount} is not positive")
             if claim.amount > cap:
                 errors.append(f"claim {claim.amount} exceeds charged - reimbursed = {cap}")
-        if not any(c.role in ("contradicts", "canonical_charge") for c in decision.citations):
+        if not human_override and not any(
+            c.role in ("contradicts", "canonical_charge") for c in decision.citations
+        ):
             errors.append("CLAIM cites no contradicting evidence or canonical charge")
         if cfg.charge_types[charge.charge_type].kind == "loss_event":
             errors.append("a loss event is never CLAIM (D-011, D-016)")

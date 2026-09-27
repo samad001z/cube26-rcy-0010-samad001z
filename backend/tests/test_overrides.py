@@ -20,8 +20,9 @@ from app.db import repo
 from app.db import tables as t
 from app.db.session import org_session
 from app.models.charge import SourceRef
+from app.models.contract import Check
 from app.models.decision import DecisionRecord
-from app.models.vocab import Decision, RecordStatus
+from app.models.vocab import ChargeType, Decision, RecordStatus, ReportType, Verdict
 from app.pipeline import run_org
 from app.review import (
     OverrideError,
@@ -288,23 +289,28 @@ def _raw_insert(engine: Engine, org: str, record_id: str, **over: object) -> Non
 
 
 @pytest.mark.parametrize(
-    "over",
+    "over, constraint",
     [
-        {"new_decision": "REVIEW"},  # changes nothing
-        {"new_decision": "CLAIM"},  # CLAIM without an amount
-        {"new_decision": "DO_NOT_CLAIM", "claim_amount": Decimal("1.00")},  # amount on non-claim
-        {"new_decision": "CLAIM", "claim_amount": Decimal("0.00")},
-        {"reason": "   "},
-        {"reviewer": ""},
-        {"sequence": 0},
-        {"new_decision": "MAYBE"},
-        {"decision_record_id": "DEC-does-not-exist"},  # must point at a stored decision
+        ({"new_decision": "REVIEW"}, "ck_overrides_changes"),  # changes nothing
+        ({"new_decision": "CLAIM"}, "ck_overrides_claim_amount"),  # CLAIM without an amount
+        (
+            {"new_decision": "DO_NOT_CLAIM", "claim_amount": Decimal("1.00")},
+            "ck_overrides_claim_amount",
+        ),  # amount on non-claim
+        ({"new_decision": "CLAIM", "claim_amount": Decimal("0.00")}, "ck_overrides_claim_amount"),
+        ({"reason": "   "}, "ck_overrides_reason"),
+        ({"reason": "\t\n "}, "ck_overrides_reason"),
+        ({"reviewer": ""}, "ck_overrides_reviewer"),
+        ({"sequence": 0}, "ck_overrides_sequence"),
+        ({"new_decision": "MAYBE"}, "ck_overrides_new"),
+        # must point at a stored decision
+        ({"decision_record_id": "DEC-does-not-exist"}, "fk_overrides_decision"),
     ],
 )
-def test_database_constraints_refuse_bad_override_rows(app_engine, loaded, over):
+def test_database_constraints_refuse_bad_override_rows(app_engine, loaded, over, constraint):
     org = _org()
     d = _setup(app_engine, org)["SYN-2"]
-    with pytest.raises((IntegrityError, DBAPIError)):
+    with pytest.raises((IntegrityError, DBAPIError), match=constraint):
         _raw_insert(app_engine, org, d.record_id, **over)
 
 
@@ -323,3 +329,209 @@ def test_override_cannot_point_at_another_orgs_decision(app_engine, loaded):
     # has no matching decision in bravo.
     with pytest.raises(IntegrityError):
         _raw_insert(app_engine, BRAVO, alpha_id)
+
+
+# --- a human CLAIM goes through the same guards as the engine's (rules-guardian review) ---
+
+
+def _store_variant(engine: Engine, org: str, d: DecisionRecord, **update: Any) -> DecisionRecord:
+    """Store a copy of `d` as the newest decision of its line (a later run), changed as the
+    engine would have written it for another situation."""
+    v = d.model_copy(
+        update={"record_id": f"{d.record_id}-v{uuid.uuid4().hex[:6]}", "run_id": str(uuid.uuid4())}
+        | update
+    ).with_hash()
+    with org_session(engine, org) as s:
+        repo.insert_decision(s, v)
+    return v
+
+
+def _with_check(d: DecisionRecord, key: str, verdict: str, detail: str) -> list[Check]:
+    return [
+        c.model_copy(update={"verdict": Verdict(verdict), "detail": detail})
+        if c.check_key == key
+        else c
+        for c in d.checks
+    ]
+
+
+def test_sample_loss_event_past_its_deadline_cannot_be_claimed(app_engine, loaded):
+    """Reproduces the review finding: FEE-0071-2 (damaged in warehouse, a reimbursement the
+    channel paid, filing window passed) was accepted as a 14.00 USD human CLAIM."""
+    with org_session(app_engine, ALPHA) as s:
+        d = repo.list_decisions_for_line(s, "FEE-0071-2")[-1]
+        before = len(repo.list_overrides(s, d.record_id))
+    assert d.decision == Decision.DO_NOT_CLAIM
+    with pytest.raises(OverrideError, match="loss event is never CLAIM") as err:
+        _override(app_engine, ALPHA, d.record_id, _req(Decision.CLAIM))
+    assert err.value.status == 409
+    with org_session(app_engine, ALPHA) as s:
+        assert len(repo.list_overrides(s, d.record_id)) == before
+
+
+@pytest.mark.parametrize(
+    "variant, refusal",
+    [
+        ({"charge_type": ChargeType.LOST_INBOUND}, "loss event is never CLAIM"),
+        ({"report_type": ReportType.REIMBURSEMENT_REPORT}, "refund of a fee"),
+        (("within_filing_window", "FAIL", "deadline 2026-01-01 passed"), "filing window"),
+        (("within_filing_window", "FAIL", "not yet eligible"), "filing window"),
+        (("not_already_reimbursed", "UNCERTAIN", "refund may belong to FEE-9"), "not settled"),
+        (("not_already_reimbursed", "FAIL", "fully reimbursed"), "not settled"),
+    ],
+)
+def test_human_claim_is_refused_when_the_engine_could_not_settle_what_is_owed(
+    app_engine, loaded, variant, refusal
+):
+    org = _org()
+    d = _setup(app_engine, org)["SYN-2"]
+    if isinstance(variant, dict):
+        v = _store_variant(app_engine, org, d, subject=d.subject.model_copy(update=variant))
+    else:
+        v = _store_variant(app_engine, org, d, checks=_with_check(d, *variant))
+    with pytest.raises(OverrideError, match=refusal) as err:
+        _override(app_engine, org, v.record_id, _req(Decision.CLAIM))
+    assert err.value.status == 409
+    # Closing the line is still possible: only CLAIM is guarded.
+    _, eff = _override(app_engine, org, v.record_id, _req(Decision.DO_NOT_CLAIM))
+    assert eff.decision == Decision.DO_NOT_CLAIM
+    with org_session(app_engine, org) as s:
+        assert [o.override.new_decision for o in repo.list_overrides(s, v.record_id)] == [
+            "DO_NOT_CLAIM"
+        ]
+
+
+def test_human_claim_goes_through_the_citation_validator(app_engine, loaded):
+    """A reimbursed amount the cited refund lines do not back is refused by the validator,
+    re-reading the store, before anything is written."""
+    org = _org()
+    d = _setup(app_engine, org)["SYN-2"]
+    v = _store_variant(app_engine, org, d, amount_reimbursed=Decimal("0.50"))
+    with pytest.raises(OverrideError, match=r"does not validate: amount_reimbursed 0\.50") as err:
+        _override(app_engine, org, v.record_id, _req(Decision.CLAIM))
+    assert err.value.status == 409
+    with org_session(app_engine, org) as s:
+        assert repo.list_overrides(s, v.record_id) == []
+
+
+def test_only_the_newest_decision_of_a_line_can_be_overridden(app_engine, loaded):
+    org = _org()
+    old = _setup(app_engine, org)["SYN-2"]
+    new = {d.subject.line_id: d for d in run_org(app_engine, org, AS_OF).decisions}["SYN-2"]
+    with pytest.raises(OverrideError, match="newer run") as err:
+        _override(app_engine, org, old.record_id, _req(Decision.DO_NOT_CLAIM))
+    assert err.value.status == 409
+    _, eff = _override(app_engine, org, new.record_id, _req(Decision.DO_NOT_CLAIM))
+    assert eff.decision == Decision.DO_NOT_CLAIM
+
+
+# --- history: kept, ordered, and every tampering is visible (test-guardian review) -------
+
+
+def test_three_overrides_keep_the_full_ordered_history(app_engine, owner_engine, loaded):
+    org = _org()
+    d = _setup(app_engine, org)["SYN-2"]
+    steps = [(Decision.DO_NOT_CLAIM, "asha"), (Decision.CLAIM, "ravi"), (Decision.REVIEW, "meera")]
+    for new, who in steps:
+        _override(app_engine, org, d.record_id, _req(new, f"step by {who}", who))
+    # Re-insert the rows in reverse order as the owner: order must come from `sequence`.
+    with owner_engine.begin() as conn:
+        conn.execute(text("SELECT set_config('app.current_org', :org, true)"), {"org": org})
+        rows = (
+            conn.execute(
+                sa.select(t.decision_overrides).where(t.decision_overrides.c.organization_id == org)
+            )
+            .mappings()
+            .all()
+        )
+        conn.execute(
+            sa.delete(t.decision_overrides).where(t.decision_overrides.c.organization_id == org)
+        )
+        for r in sorted(rows, key=lambda r: -r["sequence"]):
+            conn.execute(sa.insert(t.decision_overrides).values(**dict(r)))
+    with org_session(app_engine, org) as s:
+        history = repo.list_overrides(s, d.record_id)
+    assert [o.sequence for o in history] == [1, 2, 3]
+    assert [o.override.reviewer for o in history] == ["asha", "ravi", "meera"]
+    assert [o.override.original_decision for o in history] == ["REVIEW", "DO_NOT_CLAIM", "CLAIM"]
+    assert [o.previous_override_hash for o in history] == [
+        None,
+        history[0].content_hash,
+        history[1].content_hash,
+    ]
+    assert check_chain(d, history) == []
+    eff = effective_record(d, history)
+    assert eff.decision == Decision.REVIEW and eff.claim is None
+    assert [o.reason for o in eff.overrides] == ["step by asha", "step by ravi", "step by meera"]
+
+
+def _decision_row(owner_engine: Engine, org: str, record_id: str) -> tuple[dict[str, Any], int]:
+    with owner_engine.begin() as conn:
+        conn.execute(text("SELECT set_config('app.current_org', :org, true)"), {"org": org})
+        row = dict(
+            conn.execute(sa.select(t.decisions).where(t.decisions.c.record_id == record_id))
+            .mappings()
+            .one()
+        )
+        n = conn.execute(sa.select(sa.func.count()).select_from(t.decisions)).scalar_one()
+    return row, n
+
+
+def test_overriding_never_edits_the_engine_decision_row(app_engine, owner_engine, loaded):
+    """Every column of the stored decision row, read as the owner, is identical after two
+    overrides (one of them a CLAIM), and no decision row was added or removed."""
+    org = _org()
+    d = _setup(app_engine, org)["SYN-2"]
+    before, n_before = _decision_row(owner_engine, org, d.record_id)
+    _override(app_engine, org, d.record_id, _req(Decision.CLAIM))
+    _override(app_engine, org, d.record_id, _req(Decision.DO_NOT_CLAIM, who="ravi"))
+    after, n_after = _decision_row(owner_engine, org, d.record_id)
+    assert after == before and n_after == n_before
+    assert before["decision"] == "REVIEW" and before["content_hash"] == d.content_hash
+
+
+def test_a_column_changed_without_its_body_is_detected(app_engine, owner_engine, loaded):
+    org = _org()
+    d = _setup(app_engine, org)["SYN-2"]
+    _override(app_engine, org, d.record_id, _req(Decision.DO_NOT_CLAIM))
+    with owner_engine.begin() as conn:
+        conn.execute(text("SELECT set_config('app.current_org', :org, true)"), {"org": org})
+        conn.execute(
+            text("UPDATE decision_overrides SET reason = 'edited' WHERE organization_id = :o"),
+            {"o": org},
+        )
+    with org_session(app_engine, org) as s:
+        assert repo.override_column_problems(s, d.record_id) == [
+            "override 1: stored columns do not match its body"
+        ]
+    with pytest.raises(OverrideError, match="stored columns do not match"):
+        _override(app_engine, org, d.record_id, _req(Decision.CLAIM))
+
+
+def test_a_rehashed_claim_above_the_cap_is_detected(app_engine, owner_engine, loaded):
+    """Someone who can write rows recomputes the (unkeyed) hash with a bigger claim: the
+    chain check recomputes the cap from the engine record and reports it."""
+    org = _org()
+    d = _setup(app_engine, org)["SYN-2"]
+    rec, _ = _override(app_engine, org, d.record_id, _req(Decision.CLAIM))
+    assert rec.claim is not None
+    forged = rec.model_copy(
+        update={"claim": rec.claim.model_copy(update={"amount": Decimal("999.00")})}
+    ).with_hash()
+    with owner_engine.begin() as conn:
+        conn.execute(text("SELECT set_config('app.current_org', :org, true)"), {"org": org})
+        conn.execute(
+            sa.update(t.decision_overrides)
+            .where(t.decision_overrides.c.organization_id == org)
+            .values(
+                body=forged.model_dump(mode="json"),
+                content_hash=forged.content_hash,
+                claim_amount=Decimal("999.00"),
+            )
+        )
+    with org_session(app_engine, org) as s:
+        stored = repo.list_overrides(s, d.record_id)
+        assert repo.override_column_problems(s, d.record_id) == []
+    assert stored[0].verify_hash()
+    problems = check_chain(d, stored)
+    assert len(problems) == 1 and "is not the charge not yet reimbursed" in problems[0]

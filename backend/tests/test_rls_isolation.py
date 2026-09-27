@@ -114,6 +114,21 @@ def test_app_role_cannot_update_or_delete_anything(app_engine, loaded):
                 s.execute(text(stmt))
 
 
+def test_app_role_has_exactly_select_and_insert_on_every_table(owner_engine):
+    """Append-only for the app role: no UPDATE, DELETE, TRUNCATE, REFERENCES or TRIGGER."""
+    with owner_engine.connect() as conn:
+        rows = conn.execute(
+            text(
+                "SELECT table_name, privilege_type FROM information_schema.role_table_grants "
+                "WHERE grantee = 'alibi_app' AND table_schema = 'public'"
+            )
+        ).all()
+    grants: dict[str, set[str]] = {}
+    for name, priv in rows:
+        grants.setdefault(name, set()).add(priv)
+    assert grants == {table.name: {"SELECT", "INSERT"} for table in ALL_TABLES}
+
+
 def test_every_table_has_rls_enabled_and_forced(owner_engine):
     with owner_engine.connect() as conn:
         rows = conn.execute(

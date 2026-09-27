@@ -2,7 +2,7 @@
 
 Update at the end of every session. Newest entry on top.
 
-### 2026-09-26 - Day 4 (overrides, review endpoints, review UI), branch `day4-review`
+### 2026-09-26 - Day 4 (overrides, review endpoints, review UI), branch `day4-review` (cherry-picked onto `day4-ui` on 2026-09-27)
 - Done:
   - Override flow (D-021, proposed): `decision_overrides` table (migration 0004), append-only, forced RLS, FK to the decision, database checks (no-op, claim amount, blank reason or reviewer, unique sequence). `app/review`: effective record, hash chain re-checked on every read and before every override, human CLAIM = charged minus reimbursed, refused on pending records and when nothing remains, advisory lock per decision. Audit event `DECISION_OVERRIDDEN`. Closes triage finding 11.
   - Review endpoints behind the same API key and RLS: `GET /runs`, `GET /decisions[?run_id=]`, `GET /decisions/{id}` (charge, evidence trail with hash checks, override history, integrity problems, line history), `POST /decisions/{id}/overrides`. Another org's record answers 404. A dead database answers 503.

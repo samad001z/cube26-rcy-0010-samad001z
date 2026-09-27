@@ -58,8 +58,13 @@ def upgrade() -> None:
             "(new_decision = 'CLAIM') = (claim_amount IS NOT NULL AND claim_amount > 0)",
             name="ck_overrides_claim_amount",
         ),
-        sa.CheckConstraint("length(btrim(reason)) > 0", name="ck_overrides_reason"),
-        sa.CheckConstraint("length(btrim(reviewer)) > 0", name="ck_overrides_reviewer"),
+        # \s, not btrim: a reason of only tabs or newlines is blank too.
+        sa.CheckConstraint(
+            r"length(regexp_replace(reason, '\s', '', 'g')) > 0", name="ck_overrides_reason"
+        ),
+        sa.CheckConstraint(
+            r"length(regexp_replace(reviewer, '\s', '', 'g')) > 0", name="ck_overrides_reviewer"
+        ),
     )
     op.execute("ALTER TABLE decision_overrides ENABLE ROW LEVEL SECURITY")
     op.execute("ALTER TABLE decision_overrides FORCE ROW LEVEL SECURITY")

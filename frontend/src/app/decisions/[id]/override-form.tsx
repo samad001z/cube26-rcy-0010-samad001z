@@ -16,19 +16,20 @@ const initial: FormState = { error: null };
 export function OverrideForm({
   recordId,
   current,
-  pending,
+  claimRefusal,
   blocked,
 }: {
   recordId: string;
   current: DecisionValue;
-  pending: boolean;
-  blocked: boolean;
+  /** From the backend: why CLAIM may not be chosen, or null. The backend refuses it anyway. */
+  claimRefusal: string | null;
+  blocked: string | null;
 }) {
   const [state, action, busy] = useActionState(overrideDecision, initial);
   if (blocked) {
-    return <p className="text-sm text-fail">Overrides are blocked: the stored history does not verify.</p>;
+    return <p className="text-sm text-fail">{blocked}</p>;
   }
-  const choices = OPTIONS.filter((o) => o.value !== current && !(pending && o.value === "CLAIM"));
+  const choices = OPTIONS.filter((o) => o.value !== current && !(claimRefusal && o.value === "CLAIM"));
   return (
     <form action={action} className="space-y-3">
       <input type="hidden" name="record_id" value={recordId} />
@@ -40,10 +41,8 @@ export function OverrideForm({
             <span>{o.text}</span>
           </label>
         ))}
-        {pending && (
-          <p className="text-[11px] text-muted">
-            Claim is not offered: the engine did not finish on this charge, so amounts already reimbursed are unknown.
-          </p>
+        {claimRefusal && current !== "CLAIM" && (
+          <p className="text-[11px] text-muted">Claim is not offered: {claimRefusal}.</p>
         )}
       </fieldset>
       <div>

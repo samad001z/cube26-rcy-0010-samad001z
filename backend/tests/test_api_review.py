@@ -2,11 +2,12 @@
 comes back with hash checks, overrides go through the API, and a failed database answers
 503 instead of a partial answer."""
 
+import uuid
 from collections.abc import Iterator
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import Engine, create_engine
+from sqlalchemy import Engine, create_engine, text
 
 from app.api.agent import db_engine
 from app.api.auth import configured_keys, hash_key, parse_api_keys
@@ -14,13 +15,23 @@ from app.db import repo
 from app.db.session import org_session
 from app.main import app
 from app.models.decision import DecisionRecord
-from tests.conftest import ALPHA, BRAVO
+from app.pipeline import run_org
+from tests.conftest import ALPHA, AS_OF, BRAVO
+from tests.test_overrides import _setup
 
 ALPHA_KEY, BRAVO_KEY = "alpha-review-key-000000000", "bravo-review-key-111111111"
+# One synthetic org per tampering test, so no test sees another's edits.
+_RUN = uuid.uuid4().hex[:8]
+SYN_ORGS = {f"org_test_api_rev_{_RUN}_{n}": f"synthetic-review-key-{n}-{_RUN}" for n in range(4)}
 
 
 def _keys() -> dict[str, str]:
-    return parse_api_keys(f"{ALPHA}:{hash_key(ALPHA_KEY)},{BRAVO}:{hash_key(BRAVO_KEY)}")
+    pairs = [(ALPHA, ALPHA_KEY), (BRAVO, BRAVO_KEY), *SYN_ORGS.items()]
+    return parse_api_keys(",".join(f"{org}:{hash_key(key)}" for org, key in pairs))
+
+
+def _syn(n: int) -> tuple[str, str]:
+    return list(SYN_ORGS.items())[n]
 
 
 @pytest.fixture
@@ -91,12 +102,16 @@ def test_bravo_never_sees_alphas_runs_or_decisions(client, app_engine):
     assert client.get(f"/decisions/{alpha_id}", headers=_h(BRAVO_KEY)).status_code == 404
     got = client.get("/decisions", params={"run_id": next(iter(alpha_runs))}, headers=_h(BRAVO_KEY))
     assert got.status_code == 404
+    with org_session(app_engine, ALPHA) as s:
+        before = len(repo.list_overrides(s, alpha_id))
     post = client.post(
         f"/decisions/{alpha_id}/overrides",
         json={"new_decision": "DO_NOT_CLAIM", "reason": "not mine to judge", "reviewer": "x"},
         headers=_h(BRAVO_KEY),
     )
     assert post.status_code == 404
+    with org_session(app_engine, ALPHA) as s:
+        assert len(repo.list_overrides(s, alpha_id)) == before
 
 
 def test_detail_returns_the_evidence_trail_with_hash_checks(client, app_engine):
@@ -115,32 +130,35 @@ def test_detail_returns_the_evidence_trail_with_hash_checks(client, app_engine):
 
 
 def test_override_through_the_api_then_detail_shows_it(client, app_engine):
-    d = next(
-        x for x in _latest(app_engine, BRAVO) if x.decision.value == "REVIEW" and x.claim is None
-    )
-    detail = client.get(f"/decisions/{d.record_id}", headers=_h(BRAVO_KEY)).json()
-    before = detail["record"]["decision"]
-    target = "DO_NOT_CLAIM" if before != "DO_NOT_CLAIM" else "REVIEW"
+    # A record nobody has overridden yet (the `loaded` fixture overrides one per org), moved
+    # to a decision different from the engine's, so engine and effective values must differ.
+    with org_session(app_engine, BRAVO) as s:
+        latest = _latest(app_engine, BRAVO)
+        done = repo.overrides_by_record(s, [x.record_id for x in latest])
+    d = next(x for x in latest if x.decision.value == "REVIEW" and x.record_id not in done)
     r = client.post(
         f"/decisions/{d.record_id}/overrides",
-        json={"new_decision": target, "reason": "weights checked on the shelf", "reviewer": "ravi"},
+        json={"new_decision": "DO_NOT_CLAIM", "reason": "weights checked", "reviewer": "ravi"},
         headers=_h(BRAVO_KEY),
     )
     assert r.status_code == 201, r.text
-    assert r.json()["record"]["decision"] == target
+    assert r.json()["record"]["decision"] == "DO_NOT_CLAIM"
     assert r.json()["record"]["outcome"]["decided_by"] == "human:ravi"
     after = client.get(f"/decisions/{d.record_id}", headers=_h(BRAVO_KEY)).json()
     assert after["record"]["status"] == "overridden"
-    assert after["engine_record"]["decision"] == d.decision.value  # engine row untouched
-    assert after["overrides"][-1]["override"]["reason"] == "weights checked on the shelf"
+    assert after["record"]["decision"] == "DO_NOT_CLAIM"
+    assert after["engine_record"]["decision"] == "REVIEW"  # engine row untouched
+    assert after["engine_record"]["content_hash"] == d.content_hash
+    assert [o["override"]["reason"] for o in after["overrides"]] == ["weights checked"]
+    assert after["integrity_problems"] == []
     listed = client.get("/decisions", headers=_h(BRAVO_KEY)).json()["items"]
     row = next(i for i in listed if i["record_id"] == d.record_id)
-    assert row["decision"] == target and row["engine_decision"] == d.decision.value
-    assert row["override_count"] == len(after["overrides"])
+    assert (row["decision"], row["engine_decision"]) == ("DO_NOT_CLAIM", "REVIEW")
+    assert row["override_count"] == 1 and row["status"] == "overridden"
     # The same change again is a no-op and is refused.
     again = client.post(
         f"/decisions/{d.record_id}/overrides",
-        json={"new_decision": target, "reason": "weights checked on the shelf", "reviewer": "ravi"},
+        json={"new_decision": "DO_NOT_CLAIM", "reason": "weights checked", "reviewer": "ravi"},
         headers=_h(BRAVO_KEY),
     )
     assert again.status_code == 409
@@ -150,6 +168,8 @@ def test_override_through_the_api_then_detail_shows_it(client, app_engine):
     "payload",
     [
         {"new_decision": "CLAIM", "reason": "", "reviewer": "asha"},
+        {"new_decision": "CLAIM", "reason": " \t\n ", "reviewer": "asha"},
+        {"new_decision": "CLAIM", "reviewer": "asha"},
         {"new_decision": "CLAIM", "reason": "good reason"},
         {"new_decision": "MAYBE", "reason": "good reason", "reviewer": "asha"},
         {"new_decision": "CLAIM", "reason": "good reason", "reviewer": "asha", "amount": "99"},
@@ -163,8 +183,12 @@ def test_override_through_the_api_then_detail_shows_it(client, app_engine):
 )
 def test_bad_override_bodies_are_refused(client, app_engine, payload):
     d = _latest(app_engine, ALPHA)[0]
+    with org_session(app_engine, ALPHA) as s:
+        before = len(repo.list_overrides(s, d.record_id))
     r = client.post(f"/decisions/{d.record_id}/overrides", json=payload, headers=_h(ALPHA_KEY))
     assert r.status_code == 422
+    with org_session(app_engine, ALPHA) as s:
+        assert len(repo.list_overrides(s, d.record_id)) == before
 
 
 def test_unknown_decision_is_404(client):
@@ -207,3 +231,111 @@ def test_review_endpoints_answer_503_when_the_database_is_down(
     r = getattr(dead_db_client, method)(path, headers=_h(ALPHA_KEY), **kwargs)
     assert r.status_code == 503
     assert "dependency unavailable" in r.json()["detail"]
+
+
+# --- integrity and history signals reach the API (test-guardian and rules-guardian reviews)
+
+
+def _owner_exec(owner_engine: Engine, org: str, sql: str, **params: object) -> int:
+    with owner_engine.begin() as conn:
+        conn.execute(text("SELECT set_config('app.current_org', :org, true)"), {"org": org})
+        return conn.execute(text(sql), params).rowcount
+
+
+def test_tampered_override_shows_in_list_and_detail_and_blocks_overrides(
+    client, app_engine, owner_engine
+):
+    org, key = _syn(0)
+    d = _setup(app_engine, org)["SYN-2"]
+    ok = client.post(
+        f"/decisions/{d.record_id}/overrides",
+        json={"new_decision": "DO_NOT_CLAIM", "reason": "checked on the shelf", "reviewer": "a"},
+        headers=_h(key),
+    )
+    assert ok.status_code == 201
+    changed = _owner_exec(
+        owner_engine,
+        org,
+        "UPDATE decision_overrides SET body = jsonb_set(body, '{override,new_decision}', "
+        "'\"CLAIM\"') WHERE decision_record_id = :r",
+        r=d.record_id,
+    )
+    assert changed == 1
+    detail = client.get(f"/decisions/{d.record_id}", headers=_h(key)).json()
+    assert any("content hash does not verify" in p for p in detail["integrity_problems"])
+    assert any("columns do not match" in p for p in detail["integrity_problems"])
+    listed = client.get("/decisions", headers=_h(key)).json()["items"]
+    row = next(i for i in listed if i["record_id"] == d.record_id)
+    assert row["integrity_problems"]
+    refused = client.post(
+        f"/decisions/{d.record_id}/overrides",
+        json={"new_decision": "REVIEW", "reason": "back to review", "reviewer": "a"},
+        headers=_h(key),
+    )
+    assert refused.status_code == 409
+
+
+def test_changed_evidence_shows_as_hash_mismatch(client, app_engine, owner_engine):
+    org, key = _syn(1)
+    d = _setup(app_engine, org)["SYN-1"]
+    cited = next(c for c in d.citations if c.kind == "evidence")
+    _owner_exec(
+        owner_engine,
+        org,
+        "UPDATE evidence_records SET content_hash = 'x' || content_hash "
+        "WHERE record_id = :r AND agent = :a",
+        r=cited.id,
+        a=cited.agent,
+    )
+    detail = client.get(f"/decisions/{d.record_id}", headers=_h(key)).json()
+    ev = next(e for e in detail["evidence"] if e["record_id"] == cited.id)
+    assert ev["cited"] and ev["hash_matches_decision"] is False
+
+
+def test_rerun_keeps_an_earlier_override_visible_and_the_old_record_read_only(client, app_engine):
+    org, key = _syn(2)
+    first = _setup(app_engine, org)["SYN-2"]
+    r = client.post(
+        f"/decisions/{first.record_id}/overrides",
+        json={
+            "new_decision": "DO_NOT_CLAIM",
+            "reason": "label looks fine",
+            "reviewer": "a",
+        },
+        headers=_h(key),
+    )
+    assert r.status_code == 201
+    second = {d.subject.line_id: d for d in run_org(app_engine, org, AS_OF).decisions}["SYN-2"]
+    listed = client.get("/decisions", headers=_h(key)).json()
+    assert listed["run"]["run_id"] == second.run_id
+    row = next(i for i in listed["items"] if i["record_id"] == second.record_id)
+    assert row["decision"] == "REVIEW" and row["override_count"] == 0
+    assert row["earlier_override"] == {
+        "record_id": first.record_id,
+        "decision": "DO_NOT_CLAIM",
+        "reviewer": "a",
+        "at": row["earlier_override"]["at"],
+        "reason": "label looks fine",
+    }
+    old = client.get(f"/decisions/{first.record_id}", headers=_h(key)).json()
+    new = client.get(f"/decisions/{second.record_id}", headers=_h(key)).json()
+    assert (old["overridable"], new["overridable"]) == (False, True)
+    stale = client.post(
+        f"/decisions/{first.record_id}/overrides",
+        json={"new_decision": "CLAIM", "reason": "claim it after all", "reviewer": "a"},
+        headers=_h(key),
+    )
+    assert stale.status_code == 409 and "newer run" in stale.json()["detail"]
+
+
+def test_detail_says_why_claim_is_not_offered(client, app_engine):
+    with org_session(app_engine, ALPHA) as s:
+        loss = repo.list_decisions_for_line(s, "FEE-0071-2")[-1]
+    body = client.get(f"/decisions/{loss.record_id}", headers=_h(ALPHA_KEY)).json()
+    assert "loss event is never CLAIM" in body["claim_refusal"]
+    r = client.post(
+        f"/decisions/{loss.record_id}/overrides",
+        json={"new_decision": "CLAIM", "reason": "try to claim it", "reviewer": "a"},
+        headers=_h(ALPHA_KEY),
+    )
+    assert r.status_code == 409

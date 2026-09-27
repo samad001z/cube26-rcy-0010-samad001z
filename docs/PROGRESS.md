@@ -2,6 +2,60 @@
 
 Update at the end of every session. Newest entry on top.
 
+### 2026-09-27 - Deploy (Sydney) and final pre-eval pass, branch `main`
+
+- Done, since the Day 5 Phase 2 entry below (`day5` merged to `main`):
+  - **Eval: single-labeller mode.** `run_eval.py` now handles `labels_B.csv` absent or still
+    blank (gold is `labels_A.csv` directly, agreement not computed, REPORT.md says so at the
+    top and in a Limitations section) and refuses outright, naming how many rows are still
+    blank, when `labels_B.csv` is partially filled in — never silently choosing a mode.
+  - **Deploy region moved to Sydney**, next to the Supabase project (`ap-southeast-2`): Cloud
+    Run `asia-south1` -> `australia-southeast1`, Vercel functions `bom1` -> `syd1`. Every
+    region mention in `DEPLOY.md`, `deploy/cloudrun.sh` and `frontend/vercel.json` updated
+    together; grepped clean afterwards.
+  - **Deployed live**: API on Cloud Run (`australia-southeast1`), database on Supabase
+    Postgres (`ap-southeast-2`), review UI on Vercel (`syd1`), model explanations on Vertex
+    AI (`us-central1`, `gemini-2.5-flash`, via the Cloud Run service identity),
+    `LLM_ENABLED=true` in production. Evidence, captured 2026-09-27:
+    `docs/deploy/smoke-live-2026-09-27.txt` (23/23: authentication, tenancy isolation, the
+    review UI end to end, against the live API and UI), `docs/deploy/check-db-2026-09-27.txt`
+    (forced RLS on every table, the app role limited to `SELECT, INSERT`, no Data API role
+    access, SSL), `eval/llm-smoke-2026-09-27.txt` (one real, validated Vertex AI call:
+    `gemini-2.5-flash`, 4476 ms, 1325 in / 551 out tokens, 0.001775 USD estimate). Prices
+    verified 2026-09-27 on Google's Vertex pricing page: $0.30 / 1M input, $2.50 / 1M output
+    (thinking billed as output).
+  - **Final pre-eval pass** (this session), one commit per task:
+    1. Confidence on UNCERTAIN checks: on a live CLAIM (DEMO-F01-1), `within_filing_window`
+       showed confidence 1.00 next to an Uncertain verdict. Confirmed the engine value is
+       correct (D-015: confidence is deterministic per check, not a probability the outcome
+       is favourable) and the gap was legibility. Fixed in the UI only: a focusable,
+       tooltipped confidence value (`checks-card.tsx`, `lib/checks.ts`) explaining the
+       semantic per verdict, ending "UNCERTAIN is not a low-confidence PASS" for UNCERTAIN;
+       a documented-semantic paragraph added to ARCHITECTURE.md; a new
+       `frontend/scripts/smoke-live.mjs` check. No engine value changed, no migration
+       touched, no stored hash affected. Verified locally: 24/24 smoke checks.
+    2. The one pytest warning (`StarletteDeprecationWarning`, httpx with `TestClient`) is a
+       third-party deprecation; logged to `docs/BACKLOG.md` rather than adding a new
+       test-only dependency this close to the deadline.
+    3. `README.md` rewritten as a real project README (it had been the organisers' buildathon
+       text with a small section prepended); eval numbers left as the required pending
+       placeholder.
+    4. `ARCHITECTURE.md` extended: components, a Mermaid deploy diagram, security, reliability
+       and failure modes, and a table of every `docs/DECISIONS.md` entry.
+    5. This entry.
+    6. Hygiene: grepped the tracked tree for CLAUDE.md's forbidden words — every hit outside
+       `backend/app/llm/validate.py` (the rule-checking code itself), its test, and archived
+       or organiser rules material was none; no live violation found. `bin/check-links` added
+       and run clean (fixed one pre-existing broken link in the archived
+       `docs/round2-rules/README.md`). `make check-keys` and `make lint test` green.
+- Tests/eval status: `make lint test` green throughout; counts unchanged from the Day 5 Phase
+  2 entry (backend and eval suites untouched by this pass, aside from the new frontend
+  headless check). `make eval` was not run: labels are not yet committed.
+- Open issues: `docs/BACKLOG.md` has the current list, including the pytest warning above and
+  the `(D-0NN)`-as-ID validator gap from the previous session.
+- Next step: two humans label the held-out set independently, commit, `make eval`, fill in
+  the Evaluation section's numbers.
+
 ### 2026-09-27 - Day 5 Phase 2 (guardian review fixes), branch `day5`
 - Done: fixed the approved findings from `docs/reviews/day5-guardian-findings.md`
   (rules-guardian + test-guardian review of the Day 5 LLM layer, 2026-09-27), one commit

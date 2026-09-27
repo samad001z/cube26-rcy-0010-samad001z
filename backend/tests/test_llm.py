@@ -25,7 +25,7 @@ from app.llm.explain import CONSTANT_FALLBACK, PRICE_NOT_CONFIGURED, Explainer, 
 from app.llm.prompt import PROMPT_VERSION, build_request
 from app.llm.template import template_text
 from app.llm.trace import build_trace, corpus, trace_hash
-from app.llm.validate import ExplanationRejected, validate_explanation
+from app.llm.validate import ExplanationRejected, _decision_signals, validate_explanation
 from app.models.decision import DecisionRecord
 from app.models.vocab import Decision, RecordStatus
 from tests.factories import charge, check, record
@@ -498,6 +498,29 @@ def test_lower_case_wording_arguing_for_a_different_decision_is_rejected():
     )
     with pytest.raises(ExplanationRejected, match=r"wording argues for .*CLAIM"):
         validate_explanation(_model_json(text), tr)
+
+
+def test_real_engine_next_actions_do_not_trigger_a_false_decision_signal():
+    # test-guardian follow-up (this session) to finding 2/16: the prompt asks the model to
+    # relay next_action verbatim, and these are the engine's own real texts (rule
+    # R_REIMBURSEMENT_AMBIGUOUS and R_PARTIAL_COVERAGE, app/engine/__init__.py, and
+    # NEXT_UNIT_VALUE), all on REVIEW records. Checked against _decision_signals directly,
+    # not the full validator, since a separate, pre-existing gap (the literal "(D-021)"
+    # citations in this text are read as unrecognized IDs, tracked in docs/BACKLOG.md) would
+    # otherwise reject these for a reason unrelated to what findings 2 and 6 touched.
+    # A first version of the finding-2 fix wrongly flagged "close the line as do not claim"
+    # as arguing for DO_NOT_CLAIM; fixed with a lookbehind excluding "as do not claim".
+    real_next_actions = [
+        "Match the refund to its fee (e.g. by reimbursement or case id in Seller Central) "
+        "and re-run; until then an override can only close the line as do not claim "
+        "(D-021).",
+        "Find evidence for the remaining units and re-run, or file the covered part "
+        "outside Alibi; an override cannot claim part of a charge (D-021).",
+        "Find an authoritative unit value for this unit and file the claim outside Alibi; "
+        "loss-event claims cannot be made through an override in this version (D-021).",
+    ]
+    for next_action in real_next_actions:
+        assert _decision_signals(next_action) - {"REVIEW"} == set(), next_action
 
 
 def test_lower_case_do_not_claim_wording_on_a_claim_record_is_rejected():

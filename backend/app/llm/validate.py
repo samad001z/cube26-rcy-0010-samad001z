@@ -73,6 +73,11 @@ REVIEW = re.compile(r"\bREVIEW\b")
 # claim the fee now" on a REVIEW record, or "do not claim this yet" on a CLAIM record. The
 # capitalised checks above only catch the record's own decision word; these catch the model
 # arguing for a different one in lower case, which the capitals check never sees.
+# The engine's own advisory wording on R_REIMBURSEMENT_AMBIGUOUS ("...an override can only
+# close the line as do not claim (D-021)") names what an override cannot do; it is not the
+# model arguing the record's own decision should be DO_NOT_CLAIM, so it is stripped before
+# the signal patterns below run.
+_OVERRIDE_ADVISORY = re.compile(r"\bas do\s*n[o']?t\s+claim\b", re.IGNORECASE)
 _DNC_SIGNAL = re.compile(
     r"\bdo\s*n[o']?t\s+claim\b"
     r"|\bshould\s+not\s+(?:be\s+)?claim(?:ed)?\b"
@@ -100,7 +105,7 @@ _REVIEW_SIGNAL = re.compile(
 
 def _decision_signals(text: str) -> set[str]:
     found: set[str] = set()
-    rest = text
+    rest = _OVERRIDE_ADVISORY.sub(" ", text)
     if _DNC_SIGNAL.search(rest):
         found.add("DO_NOT_CLAIM")
         rest = _DNC_SIGNAL.sub(" ", rest)

@@ -8,7 +8,9 @@ import csv
 import os
 import subprocess
 from collections import Counter
+from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -188,6 +190,34 @@ def test_agent_run_and_report_end_to_end_on_the_development_sample():
     assert "## 4. Failure modes" in report and ids[0] in report
     assert "Model calls: 0" in report
     assert report.count("| agree |") + report.count("| disagree |") == 61
+
+
+def _run(explanations: list[object]) -> run_eval.AgentRun:
+    decisions = {str(i): SimpleNamespace(explanation=e) for i, e in enumerate(explanations)}
+    return run_eval.AgentRun(decisions, {}, 0.0, 0.0)  # type: ignore[arg-type]
+
+
+def test_model_call_line_counts_calls_not_cache_hits():
+    # Guardian finding 11: the old count used `model_version is not None`, which includes
+    # cache hits (no call made) and misses a rejected-text call (billed, template kept).
+    never_sent = None
+    cache_hit = SimpleNamespace(model_id="gemini-1", cached=True, cost_estimate_usd=None)
+    rejected_but_billed = SimpleNamespace(
+        model_id="gemini-1", cached=False, cost_estimate_usd=Decimal("0.0010")
+    )
+    fresh = SimpleNamespace(model_id="gemini-1", cached=False, cost_estimate_usd=Decimal("0.0020"))
+    run = _run([never_sent, cache_hit, rejected_but_billed, fresh])
+    line = run_eval._model_call_line(run)
+    assert line.startswith("Model calls: 2, cache hits: 1, model version(s): gemini-1")
+    assert "total $0.0030" in line
+
+
+def test_model_call_line_reports_when_cost_is_not_fully_known():
+    priced = SimpleNamespace(model_id="gemini-1", cached=False, cost_estimate_usd=Decimal("0.001"))
+    unpriced = SimpleNamespace(model_id="gemini-1", cached=False, cost_estimate_usd=None)
+    line = run_eval._model_call_line(_run([priced, unpriced]))
+    assert "Model calls: 2" in line
+    assert "cost not fully known (1 of 2 calls priced)" in line
 
 
 def test_refuses_when_the_data_changed_after_labelling(repo, monkeypatch, capsys):

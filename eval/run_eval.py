@@ -29,6 +29,7 @@ import time
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from decimal import Decimal
 from pathlib import Path
 
 from alembic import command
@@ -220,6 +221,29 @@ def _pct(x: object) -> str:
     return "n/a" if x is None else f"{x}"
 
 
+def _model_call_line(run: AgentRun) -> str:
+    """Guardian finding 11: the old line always printed "$0.00" and "no model version",
+    whatever the decisions actually carried, and counted `model_version is not None`, which
+    includes cache hits (no call made) and misses calls whose text was rejected (a call was
+    made and billed, but the decision keeps the template with model_version unset)."""
+    explanations = [d.explanation for d in run.decisions.values() if d.explanation is not None]
+    calls = [e for e in explanations if e.model_id is not None and not e.cached]
+    cached = sum(1 for e in explanations if e.cached)
+    if not calls:
+        return f"Model calls: {len(calls)}"
+    models = sorted({e.model_id for e in calls if e.model_id})
+    priced = [e.cost_estimate_usd for e in calls if e.cost_estimate_usd is not None]
+    if len(priced) < len(calls):
+        cost = f"cost not fully known ({len(priced)} of {len(calls)} calls priced)"
+    else:
+        total = sum(priced, Decimal("0"))
+        cost = f"total ${total} (${total / len(priced):.6f} per call)"
+    return (
+        f"Model calls: {len(calls)}, cache hits: {cached}, model version(s): "
+        f"{', '.join(models) or 'unknown'}; {cost}"
+    )
+
+
 def _table(header: list[str], rows: list[list[str]]) -> list[str]:
     def cell(v: str) -> str:
         return v.replace("|", "\\|").replace("\n", " ")
@@ -405,7 +429,6 @@ def render_report(
         out.append("")
     lat = list(run.latency_ms.values())
     pending = sum(1 for d in run.decisions.values() if d.status.value == "pending")
-    model_calls = sum(1 for d in run.decisions.values() if d.model_version is not None)
     llm = os.environ.get("LLM_ENABLED", "false")
     out += [
         "## 5. Latency and cost",
@@ -415,8 +438,7 @@ def render_report(
         f"{percentile(lat, 95):.1f} ms, max {max(lat):.1f} ms, over {len(lat)} charges.",
         f"- Whole run including ingestion and migration: {run.total_s:.2f} s "
         f"(ingestion {run.ingest_s:.2f} s), {run.total_s * 1000 / len(lat):.1f} ms per charge.",
-        f"- Model calls: {model_calls} (LLM_ENABLED={llm}); model cost per charge: $0.00. "
-        "Decisions carry no model version.",
+        f"- {_model_call_line(run)} (LLM_ENABLED={llm}).",
         f"- Decisions that failed open (status pending): {pending}.",
         "",
         "## 6. Every case",

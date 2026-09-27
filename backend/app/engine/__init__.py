@@ -390,7 +390,7 @@ def _fire(
             f"evidence contradicts the charge for only part of it (coverage {a.coverage} of "
             f"quantity {charge.quantity}): {a.detail}.",
             "Find evidence for the remaining units and re-run, or file the covered part "
-            "outside Alibi; an override claims only the full remaining charge (D-021).",
+            "outside Alibi; an override cannot claim part of a charge (D-021).",
         )
     if charge.charge_type == ChargeType.INBOUND_DEFECT_FEE and charge.defect_category is None:
         return Fired(

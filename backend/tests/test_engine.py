@@ -199,7 +199,7 @@ def test_quantity_above_one_with_one_unit_record_is_partial_review():
     assert d.check("evidence_contradicts_charge").confidence == Decimal("0.45")
     # D-021: an override cannot claim part of a charge, so the next action does not offer it.
     assert d.next_action is not None and "outside Alibi" in d.next_action
-    assert "claim the covered part by override" not in d.next_action
+    assert "cannot claim part of a charge" in d.next_action
 
 
 def test_prep_on_other_shipment_only_is_no_relevant_evidence():

@@ -7,7 +7,7 @@ import time
 import uuid
 from collections.abc import Sequence
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -380,7 +380,10 @@ def test_sample_loss_event_past_its_deadline_cannot_be_claimed(app_engine, loade
         ({"charge_type": ChargeType.LOST_INBOUND}, "loss event is never CLAIM"),
         # rules-guardian H1: a weight-tier fee is owed only the overcharge, not the fee
         ({"charge_type": ChargeType.FULFILMENT_FEE_WEIGHT_TIER}, "fee_difference"),
-        (("amount_computable", "FAIL", "needs an unsourced fee schedule"), "not the charge"),
+        (
+            ("amount_computable", "FAIL", "needs an unsourced fee schedule"),
+            "could not be worked out",
+        ),
         ({"report_type": ReportType.REIMBURSEMENT_REPORT}, "refund of a fee"),
         (("within_filing_window", "FAIL", "deadline 2026-01-01 passed"), "filing window"),
         (("within_filing_window", None, None), "filing window does not allow a claim: not"),
@@ -729,3 +732,87 @@ def test_a_charge_missing_from_the_store_blocks_a_human_claim(app_engine, owner_
     )
     with pytest.raises(OverrideError, match="charge is not in the store"):
         _override(app_engine, org, v.record_id, _req(Decision.CLAIM))
+
+
+# --- third review --------------------------------------------------------------------
+
+
+def test_partial_coverage_cannot_be_claimed_in_full(app_engine, loaded):
+    org = _org()
+    d = _setup(app_engine, org)["SYN-2"]
+    v = _store_variant(app_engine, org, d, coverage=Decimal("0.5000"))
+    with pytest.raises(OverrideError, match="cannot claim part of a charge") as err:
+        _override(app_engine, org, v.record_id, _req(Decision.CLAIM))
+    assert err.value.status == 409
+
+
+def _rules_with_fee_window(close_days: int, open_days: int | None = None):
+    """The channel rules with a filing window on inbound defect fees, as if one were
+    sourced (none is today; the sourced windows are all on loss events, which can never be
+    claimed). Lets the override-day judgement be tested on a claimable charge type."""
+    from app.core.rules import load_rules
+
+    rules = load_rules()
+    ct = ChargeType.INBOUND_DEFECT_FEE
+    fw = rules.filing_windows[ct].model_copy(
+        update={"window_close_days": close_days, "window_open_days": open_days}
+    )
+    return rules.model_copy(update={"filing_windows": {**rules.filing_windows, ct: fw}})
+
+
+def test_filing_window_is_judged_on_the_date_of_the_override(app_engine, loaded, monkeypatch):
+    """No stubbed pre-checks: the window is open today and closed on the override date."""
+    org = _org()
+    d = _setup(app_engine, org)["SYN-2"]  # posted 2026-07-18; fee windows are unsourced
+    today = datetime.now(UTC).date()
+    close = (today - date(2026, 7, 18)).days + 30  # deadline 30 days from today
+    monkeypatch.setattr("app.review.load_rules", lambda: _rules_with_fee_window(close))
+    later = datetime.combine(today + timedelta(days=45), datetime.min.time(), tzinfo=UTC)
+    with pytest.raises(OverrideError, match="does not allow a claim today") as err:
+        _override(app_engine, org, d.record_id, _req(Decision.CLAIM), at=later)
+    assert err.value.status == 409
+    _, eff = _override(app_engine, org, d.record_id, _req(Decision.CLAIM), at=AT_NOW())
+    assert eff.decision == Decision.CLAIM
+
+
+def AT_NOW() -> datetime:
+    return datetime.now(UTC)
+
+
+def test_window_opened_since_the_run_asks_for_a_re_run(app_engine, loaded, monkeypatch):
+    org = _org()
+    d = _setup(app_engine, org)["SYN-2"]
+    not_yet = [
+        c.model_copy(update={"verdict": Verdict.FAIL, "detail": "not yet eligible: ..."})
+        if c.check_key == "within_filing_window"
+        else c
+        for c in d.checks
+    ]
+    v = _store_variant(app_engine, org, d, checks=not_yet)
+    monkeypatch.setattr("app.review.load_rules", lambda: _rules_with_fee_window(3650, 0))
+    with pytest.raises(OverrideError, match="opened since the run; re-run") as err:
+        _override(app_engine, org, v.record_id, _req(Decision.CLAIM), at=AT_NOW())
+    assert err.value.status == 409
+
+
+def test_a_run_committed_during_the_override_rolls_it_back(app_engine, loaded, monkeypatch):
+    """The newest-decision check is repeated after the insert: if a newer decision of the
+    line appeared meanwhile, the override is refused and nothing is stored."""
+    org = _org()
+    d = _setup(app_engine, org)["SYN-2"]
+    newer = d.model_copy(update={"record_id": f"{d.record_id}-newer"})
+    real = repo.list_decisions_for_line
+    calls = {"n": 0}
+
+    def second_call_sees_a_newer_run(session, line_id):
+        calls["n"] += 1
+        found = real(session, line_id)
+        return found if calls["n"] == 1 else [*found, newer]
+
+    monkeypatch.setattr("app.review.repo.list_decisions_for_line", second_call_sees_a_newer_run)
+    with pytest.raises(OverrideError, match="newer run decided this charge line meanwhile") as err:
+        _override(app_engine, org, d.record_id, _req(Decision.DO_NOT_CLAIM))
+    assert err.value.status == 409 and calls["n"] == 2
+    monkeypatch.undo()
+    with org_session(app_engine, org) as s:
+        assert repo.list_overrides(s, d.record_id) == []

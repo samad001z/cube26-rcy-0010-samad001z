@@ -37,6 +37,12 @@ def _keys() -> dict[str, str]:
     return parse_api_keys(",".join(f"{org}:{hash_key(key)}" for org, key in pairs))
 
 
+def _today_window() -> set[str]:
+    """Today, or yesterday if the request ran just before midnight UTC."""
+    now = datetime.now(UTC).date()
+    return {now.isoformat(), (now - timedelta(days=1)).isoformat()}
+
+
 def _syn(n: int) -> tuple[str, str]:
     return list(SYN_ORGS.items())[n]
 
@@ -368,7 +374,7 @@ def test_detail_gives_captured_at_custody_window_and_deadline_as_fields(client, 
             "verdict": x.check("within_filing_window").verdict.value,
             "detail": x.check("within_filing_window").detail,
         }
-        assert got["as_of"] == datetime.now(UTC).date().isoformat()
+        assert got["as_of"] in _today_window()
         statuses[x.subject.line_id] = got
     passed = statuses["FEE-0071-2"]  # damaged in warehouse, 60-day window long closed
     assert passed["status"] == "passed" and passed["deadline"] is not None
@@ -550,7 +556,7 @@ def test_deadline_states_are_judged_today(client, app_engine):
     with org_session(app_engine, org) as s:
         repo.insert_decision(s, aged)
     aged_got = client.get(f"/decisions/{aged.record_id}", headers=_h(key)).json()["deadline"]
-    assert aged_got["status"] == "open" and aged_got["as_of"] == today.isoformat()
+    assert aged_got["status"] == "open" and aged_got["as_of"] in _today_window()
 
 
 def test_custody_window_end_is_exclusive_and_outside_records_say_so(client, app_engine):
@@ -588,3 +594,29 @@ def test_custody_window_is_withheld_when_the_engine_config_changed(client, app_e
     body = client.get(f"/decisions/{decided['SYN-C'].record_id}", headers=_h(key)).json()
     assert [e["custody_window"] for e in body["evidence"]] == [None]
     assert "inside custody window" in body["evidence"][0]["why"]  # the stored text remains
+
+
+def test_charge_changed_since_the_decision_withholds_window_and_deadline(client, app_engine):
+    """If the stored charge no longer hashes to what the decision recorded, the page does
+    not compute a custody window or a deadline from it (the stored text remains)."""
+    org, key = _syn(7)
+    decided = _load(
+        app_engine,
+        org,
+        [charge("SYN-H", org=org, defect_category="label")],
+        [prep_all_pass("PRP-H", org=org)],
+    )
+    d = decided["SYN-H"]
+    v = d.model_copy(
+        update={
+            "record_id": f"{d.record_id}-h",
+            "run_id": str(uuid.uuid4()),
+            "subject": d.subject.model_copy(update={"charge_content_hash": "0" * 64}),
+        }
+    ).with_hash()
+    with org_session(app_engine, org) as s:
+        repo.insert_decision(s, v)
+    body = client.get(f"/decisions/{v.record_id}", headers=_h(key)).json()
+    assert body["deadline"]["status"] == "unknown"
+    assert body["deadline"]["at_decision"]["detail"] == d.check("within_filing_window").detail
+    assert [e["custody_window"] for e in body["evidence"]] == [None]

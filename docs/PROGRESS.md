@@ -33,12 +33,21 @@ Update at the end of every session. Newest entry on top.
   - rules-guardian, three passes.
     - First pass: 2 Critical (a human CLAIM bypassed every guard), 3 High, 2 Medium, 3 Low. All fixed or documented.
     - Second pass: 2 High (a full-fee claim on a fee_difference charge; the store and date not re-checked), 3 Medium, 4 Low. All fixed.
-    - Third, focused pass: see the entry below this one, if any.
+    - Third, focused pass on the fixes: no Critical or High. Fixed its 1 Medium and 3 Low:
+      - a partially covered charge could be claimed in full; now refused (A3), and the next action is reworded;
+      - clearer message when the window has opened since the run;
+      - D-021 now states the post-insert re-check's limit exactly;
+      - stale docstrings.
   - test-guardian, three passes.
     - First pass: the API override test only restored the engine's own decision; now fixed. Plus grant, ordering, raw-row and tamper tests.
     - Second pass: 25 of 56 mutants survived in the new code. Tests were added and all 33 targeted mutants are now caught.
+    - Third pass: nothing weakened, snapshot untouched; 5 of 14 mutants survived. Tests were added and all 6 re-run mutants are now caught:
+      - the override day with a real (patched-in) sourced window;
+      - the post-insert race guard;
+      - the charge-hash guards on deadline and custody window.
+      - Date checks tolerate a midnight crossing.
 - Tests/eval status:
-  - `make lint test` green: 353 backend and 46 eval tests on Postgres 16.
+  - `make lint test` green: 358 backend and 46 eval tests on Postgres 16.
   - `next build` passes.
   - Headless Chromium against `make review-ui`, all passing, no console errors:
     - sign-in and wrong-key refusal; cookie invisible to page JS;
@@ -50,7 +59,8 @@ Update at the end of every session. Newest entry on top.
   - `make eval` and anything on eval/ data were never run: the labels are still blank.
 - Open issues:
   - Two humans still need to label `eval/labelling_sheet.csv` before `make eval`. This is the blocker for the evaluation section.
-  - The D-021 amendment (A1, A2 and the rest of the second-review changes) awaits the human lead's confirmation.
+  - The D-021 amendment (A1, A2, A3 and the rest of the second- and third-review changes) awaits the human lead's confirmation.
+  - The post-insert newest-decision check does not catch a run committing between it and the override's commit (`run_org` takes no lock); that override then shows as `earlier_override` on the new run.
   - Reviewer identity is self-declared (the org key identifies an organisation, not a person).
   - Loss-event claims are filed outside Alibi.
   - The fail-open e2e test raises OperationalError from `decide` while the database stays up. It does not cover a real lost connection, where writing the pending row could fail too.

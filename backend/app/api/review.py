@@ -88,9 +88,10 @@ def _problems(session: Session, rec: DecisionRecord, overrides: list[OverrideRec
 def _earlier_override(
     found: tuple[OverrideRecord, datetime] | None, current: DecisionRecord, current_at: datetime
 ) -> dict[str, Any] | None:
-    """A human override of the same charge line made on an earlier run. Overrides attach to
-    one decision, so a re-run does not carry it; the list shows it so it is never hidden.
-    An override on a later run (when browsing an older one) is not "earlier"."""
+    """The newest human override of the same charge line, when it was made on an earlier run.
+    Overrides attach to one decision, so a re-run does not carry them; the list shows this
+    one so the newest human judgement stays visible. When browsing an older run, an override
+    on a later run is not "earlier" and nothing is shown (the line history lists them all)."""
     if found is None:
         return None
     o, overridden_at = found

@@ -160,9 +160,9 @@ organisation's record answers 404, like a missing one. A database failure answer
   in `decision_overrides` (append-only for the app role, forced RLS). The engine's decision
   row is never changed. A human CLAIM claims charged minus reimbursed, is refused where the
   engine could not settle what is owed (pending, loss event, fee refund line, an amount
-  that is not the charge itself, filing window closed or not open, reimbursement not
-  settled, older run) or where the store changed since the run (refunds re-matched, window
-  judged today), and goes through the citation validator. Every override writes a `DECISION_OVERRIDDEN` audit event.
+  that is not the charge itself, partial evidence coverage, filing window closed or not
+  open, reimbursement not settled, older run) or where the store changed since the run
+  (refunds re-matched, window judged today), and goes through the citation validator. Every override writes a `DECISION_OVERRIDDEN` audit event.
 
 Review UI (`frontend/`, Next.js): sign-in with the org key into an httpOnly cookie; the
 decisions list (equal-weight CLAIM / DO NOT CLAIM / REVIEW totals, filters); the decision

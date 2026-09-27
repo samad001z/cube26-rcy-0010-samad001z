@@ -17,9 +17,12 @@ Each override stores the content hash of the engine record and of the previous o
   override is refused.
 - A human CLAIM is refused when the engine could not establish what is owed or whether it
   can be filed: a pending (fail-open) record, a loss event (its amount is what was already
-  paid, D-011), a fee refund line, a filing window that is closed or not yet open, or a
-  reimbursement check that is not PASS (fully reimbursed, or a refund that could belong to
-  more than one fee).
+  paid, D-011), a fee refund line, an amount owed that is not the charge itself (claim
+  basis not full_amount, or amount_computable not PASS), evidence covering only part of
+  the charge, a filing window that is closed or not yet open, or a reimbursement check that
+  is not PASS (fully reimbursed, or a refund that could belong to more than one fee).
+- It is also refused when the store changed since the run: refund lines are re-matched over
+  every stored charge, and the filing window is judged on the day of the override.
 - The would-be CLAIM record then goes through the same citation validator as the engine's
   CLAIMs, re-reading the charge and cited refund lines from the store. The only check left
   out is "cites contradicting evidence": the reviewer's reason stands in for it.
@@ -186,9 +189,16 @@ def claim_refusal(engine: DecisionRecord, cfg: EngineConfig) -> str | None:
     amount = _check(engine, "amount_computable")
     if ct.claim_basis != "full_amount" or amount is None or amount.verdict != Verdict.PASS:
         detail = amount.detail if amount else "not recorded"
+        if ct.claim_basis != "full_amount":
+            return (
+                f"the amount owed is not the charge itself ({ct.claim_basis}): {detail}; an "
+                "override can only claim the full remaining charge"
+            )
+        return f"the amount to claim could not be worked out: {detail}"
+    if engine.coverage is not None and engine.coverage < 1:
         return (
-            f"the amount owed is not the charge itself ({ct.claim_basis}): {detail}; an "
-            "override can only claim the full remaining charge"
+            f"evidence covers only part of the charge (coverage {engine.coverage}); an "
+            "override cannot claim part of a charge"
         )
     window = _check(engine, "within_filing_window")
     if window is None or window.verdict == Verdict.FAIL:
@@ -213,13 +223,22 @@ def claim_refusal_now(
     after it (re-matched over every stored charge, as the pre-checks do) and the filing
     window judged today rather than at the run's as-of date."""
     refusal = claim_refusal(engine, cfg)
-    if refusal is not None:
-        return refusal
     charges = repo.list_charges(session)
     charge = next((c for c in charges if c.line_id == engine.subject.line_id), None)
     if charge is None:
-        return "the charge is not in the store"
+        return refusal or "the charge is not in the store"
     pre = run_prechecks(charges, rules, cfg, today)[charge.line_id]
+    window = _check(engine, "within_filing_window")
+    if (
+        refusal is not None
+        and refusal.startswith("the filing window does not allow a claim")
+        and window is not None
+        and window.verdict == Verdict.FAIL
+        and pre.filing.verdict != Verdict.FAIL
+    ):
+        return "the filing window has opened since the run; re-run the charge before claiming it"
+    if refusal is not None:
+        return refusal
     if pre.ambiguous_reimbursements:
         ids = ", ".join(r.line_id for r in pre.ambiguous_reimbursements)
         return f"refund line(s) {ids} could now belong to this fee; re-run the charge first"

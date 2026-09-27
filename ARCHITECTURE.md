@@ -1,6 +1,31 @@
 # Architecture
 
-Status: partial. This file covers the decision path (Day 2), the API and the eval harness (Day 3), human review and overrides (Day 4), and model explanations (Day 5). Deployment is described in DEPLOY.md.
+Status: final for Round 2 submission. Covers the decision path (Day 2), the API and the eval harness (Day 3), human review and overrides (Day 4), model explanations (Day 5), and the live deployment (Day 5). Deploy steps are in [DEPLOY.md](DEPLOY.md).
+
+## Components
+
+| Component | Stack | Directory |
+|---|---|---|
+| Decision engine and API | Python 3.12, FastAPI, SQLAlchemy 2, Alembic | `backend/app/{core,models,db,ingest,adapters,precheck,resolution,retrieval,engine,claims,llm,review,api}` |
+| Database | PostgreSQL 16, row-level security forced on every table | Supabase in production, Docker locally |
+| Review UI | Next.js, TypeScript, Tailwind, shadcn/ui | `frontend/` |
+| Eval harness | Python, no dependency on the decision engine's own tests | `eval/` |
+| Deploy scripts | bash, `gcloud`, `psql` | `deploy/`, `bin/` |
+
+Every read and write to the database goes through an organisation-scoped session (`app/db/session.py`); nothing in `backend/app` connects without one. The frontend never computes a decision, an amount or a citation: it renders what the API returns and posts an override request with a reviewer and a reason.
+
+## Deploy layout
+
+```mermaid
+flowchart LR
+    U["Browser"] -->|HTTPS| V["Vercel: review UI<br/>Next.js, region syd1"]
+    V -->|"X-API-Key, HTTPS"| C["Cloud Run: alibi-api<br/>FastAPI, region australia-southeast1"]
+    C -->|"forced RLS, role alibi_app"| S["Supabase Postgres<br/>schema alibi, region ap-southeast-2"]
+    C -->|"Cloud Run service identity"| G["Vertex AI: Gemini<br/>gemini-2.5-flash, region us-central1"]
+    C -.->|reads at startup| M["Secret Manager<br/>DATABASE_URL, ATTACHMENT_KEY_SECRET, ALIBI_API_KEYS"]
+```
+
+The API and the database sit in neighbouring regions (`australia-southeast1`, `ap-southeast-2`) to keep the query path short; the UI's serverless functions run in `syd1` for the same reason. The model call is the one hop that leaves the region, to `us-central1`, because that is where the chosen Gemini model is available; it happens after the decision is already made and validated; see [Model usage](#model-usage-d-022). Full steps, including how each of these is provisioned: [DEPLOY.md](DEPLOY.md).
 
 ## Decision path (one organisation, one run)
 
@@ -244,4 +269,79 @@ agreement (raw and Cohen's kappa) before resolution, and computes no agent metri
 disagreement is unresolved. It then runs the real pipeline on a freshly migrated
 `alibi_eval` database and writes `eval/REPORT.md`. It exits 4 if the agent made any false
 claim (the PRD's hard gate) and 5 if any charge got no decision. Latency is measured per charge in
-`run_org` (`RunResult.latency_ms`), outside the hashed decision record.
+`run_org` (`RunResult.latency_ms`), outside the hashed decision record. A single-labeller mode
+covers a partial pass: if `labels_B.csv` is absent or still the blank template, gold is
+`labels_A.csv` directly and agreement is not computed; the report says so at the top and in a
+Limitations section. A `labels_B.csv` with some rows done and some not refuses outright,
+naming how many rows are still blank, rather than silently choosing a mode.
+
+## Security
+
+- **Tenancy isolation.** Every table has `organization_id NOT NULL`, row-level security
+  enabled and forced (D-009): the owner role is subject to it too, not only the app role.
+  The database connection the API uses (`alibi_app`) has `SELECT, INSERT` only on every
+  table (no `UPDATE`, `DELETE`, `BYPASSRLS`, superuser), so a compromised API process still
+  cannot rewrite or erase a stored decision or audit event. `bin/check-db` verifies this
+  against the live database on every deploy; evidence: `docs/deploy/check-db-2026-09-27.txt`.
+- **No secret in the repository or an image.** Database URLs, `ATTACHMENT_KEY_SECRET` and
+  the API key hashes live in Google Secret Manager, injected into the Cloud Run container as
+  environment variables; `bin/check-no-keys` (CI, `make check-keys`) refuses a commit that
+  looks like a private key or a real database password.
+- **Model access needs no key file.** The API calls Vertex AI as the Cloud Run service
+  identity (a Google service account with the Vertex AI User role and nothing else); no
+  credential file is ever part of the image. Locally, a developer uses their own
+  `gcloud auth application-default login` or a key file kept outside the repository.
+  `ALIBI_TESTS_NO_ENV_FILE` (`backend/tests/conftest.py`) additionally guarantees that tests
+  never read a developer's real `.env`, so a real price or credential path cannot leak into
+  a test that never asked for it.
+- **Review UI session.** The organisation API key is kept in an httpOnly cookie set by the
+  UI's own server, invisible to page scripts (checked by `docs/deploy/smoke-live-2026-09-27.txt`
+  and the headless browser check in `frontend/scripts/smoke-live.mjs`); only that server, not
+  the browser, sends it on to the API.
+- **API keys are hashed.** `ALIBI_API_KEYS` holds `org_id:sha256(key)` pairs; a presented key
+  is hashed and compared with `hmac.compare_digest`, and a hash listed twice is refused so a
+  key never maps to two organisations. The database and image never hold a plaintext key.
+- **Attachment keys are non-guessable.** An attachment's key is an HMAC over
+  `(organization_id, agent, record_id, source path)` with a secret (`ATTACHMENT_KEY_SECRET`)
+  that never leaves the environment; a key cannot be derived from the visible fields alone.
+
+## Reliability and failure modes
+
+| Failure | Behaviour |
+|---|---|
+| One charge's decision step raises | That charge is still stored, as REVIEW with status `pending` and `reason_code` `ENGINE_ERROR` (or `DEPENDENCY_UNAVAILABLE` for a database failure), inside a savepoint so the rest of the run continues (rule 5, fail open). |
+| A pre-check (duplicate, reimbursement) raises | Every charge of the run fails open the same way; none are silently dropped. |
+| The model call fails, times out, or its text fails validation | The decision is unaffected; the stored explanation falls back to the template, with the reason recorded in `fallback_reason`. |
+| The template itself fails to build | A fixed, constant explanation is used instead (`CONSTANT_FALLBACK`), so an explanation failure can never cost a decision. |
+| One run's model calls are slow | A per-run wall-clock budget (`LLM_RUN_BUDGET_S`, default 200s) stops sending new calls once spent; remaining charges get the template, so one slow model cannot exceed the deploy's own request timeout and roll back the whole run. |
+| The database is unreachable | `GET /health` answers 503; `POST /agent` and the review endpoints answer 503 rather than hang. |
+| The engine config is invalid | Checked (`check_windows_consistent`) before anything is written; a bad config answers 500 and stores nothing, so no charge is ever left without a decision because half a run committed. |
+| A request body is too large | Cloud Run's own 32 MiB request limit answers first; within that, a per-file check in the API answers 413 over 10 MB. |
+| The API scales to zero between requests | The first request after idle takes a few seconds to start an instance (cold start); no request is dropped, only delayed. |
+| The Supabase project is idle for a period | The free-tier project pauses; the next request resumes it, which is slower than a warm connection. |
+
+## Key decisions
+
+Full text and reasoning: [`docs/DECISIONS.md`](docs/DECISIONS.md).
+
+| # | Decision |
+|---|---|
+| D-001 | Rules decide; the model only parses and writes text |
+| D-002 | Keyed relational retrieval, no vector store |
+| D-003 | A duplicate charge is itself claimable; the earlier charge is the evidence |
+| D-004 | Six verdicts; coverage is a number, not a separate label, on CONTRADICTED |
+| D-008 | Contract shape and CSV adapter choices, since no official schema was published |
+| D-009 | Row-level security, forced on every table, tested against Postgres |
+| D-010 | Attachment keys: HMAC over org, agent, record id and path |
+| D-011 | Zero-amount lines: a fee of 0.00 is DO_NOT_CLAIM; a loss event of 0.00 is REVIEW |
+| D-012 | The held-out eval set is built and labelled independently, not sourced from the organisers |
+| D-013 | An inbound defect fee needs a defect category to be claimed |
+| D-014 | Only a known, passed filing deadline blocks a claim; an unverified one does not |
+| D-015 | Confidence is deterministic, never model-produced; rule order and custody windows |
+| D-016 | Loss events: evidence is scored against what the line asserts, decision mapped per charge type |
+| D-017 | The first sourced filing windows, with an explicit open day |
+| D-018 | Evidence keyed by pod and record id, since a record id is unique only within its pod |
+| D-019 | The refund custody window matches the sourced filing window's close |
+| D-020 | `POST /agent`: organisation comes only from the key; date is always today |
+| D-021 | Overrides live in their own append-only table; the engine's row is never changed |
+| D-022 | Model explanations: Gemini on Vertex AI, validated against the trace, never in the decision path |

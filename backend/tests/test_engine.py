@@ -197,6 +197,9 @@ def test_quantity_above_one_with_one_unit_record_is_partial_review():
     assert d.decision == Decision.REVIEW and d.rule_id == "R_PARTIAL_COVERAGE"
     assert d.coverage == Decimal("0.5000")
     assert d.check("evidence_contradicts_charge").confidence == Decimal("0.45")
+    # D-021: an override cannot claim part of a charge, so the next action does not offer it.
+    assert d.next_action is not None and "outside Alibi" in d.next_action
+    assert "claim the covered part by override" not in d.next_action
 
 
 def test_prep_on_other_shipment_only_is_no_relevant_evidence():
@@ -678,6 +681,9 @@ def test_refund_that_could_belong_to_two_fees_sends_both_to_review():
         assert d.rule_id == "R_REIMBURSEMENT_AMBIGUOUS"
         assert d.check("not_already_reimbursed").verdict == Verdict.UNCERTAIN
         assert "R1" in d.reason
+        # D-021 refuses a human CLAIM here, so the next action only offers closing the line.
+        assert d.next_action is not None and "re-run" in d.next_action
+        assert "only close the line as do not claim" in d.next_action
 
 
 def test_a_refund_offsets_at_most_its_own_amount():

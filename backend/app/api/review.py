@@ -9,7 +9,7 @@ The reviewer name on an override is supplied by the caller. The API key identifi
 organisation, not a person, so the name is recorded as given (limitation, README).
 """
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -19,14 +19,14 @@ from sqlalchemy.orm import Session
 
 from app.api.agent import db_engine
 from app.api.auth import require_org
-from app.core.rules import EngineConfig, load_engine_config
+from app.core.rules import ChannelRules, EngineConfig, load_engine_config, load_rules
 from app.db import repo
 from app.db.session import org_session
 from app.models.charge import Charge
 from app.models.contract import EvidenceRecord
 from app.models.decision import DecisionRecord
-from app.models.vocab import ChargeType, Decision, Verdict
-from app.precheck import NOT_YET_ELIGIBLE
+from app.models.vocab import ChargeType, Decision
+from app.precheck import filing_window
 from app.retrieval import custody_window
 from app.review import (
     OverrideError,
@@ -34,7 +34,7 @@ from app.review import (
     OverrideRequest,
     apply_override,
     check_chain,
-    claim_refusal,
+    claim_refusal_now,
     effective_record,
 )
 
@@ -85,10 +85,16 @@ def _problems(session: Session, rec: DecisionRecord, overrides: list[OverrideRec
     return check_chain(rec, overrides) + repo.override_column_problems(session, rec.record_id)
 
 
-def _earlier_override(o: OverrideRecord | None, current_record_id: str) -> dict[str, Any] | None:
+def _earlier_override(
+    found: tuple[OverrideRecord, datetime] | None, current: DecisionRecord, current_at: datetime
+) -> dict[str, Any] | None:
     """A human override of the same charge line made on an earlier run. Overrides attach to
-    one decision, so a re-run does not carry it; the list shows it so it is never hidden."""
-    if o is None or o.decision_record_id == current_record_id:
+    one decision, so a re-run does not carry it; the list shows it so it is never hidden.
+    An override on a later run (when browsing an older one) is not "earlier"."""
+    if found is None:
+        return None
+    o, overridden_at = found
+    if o.decision_record_id == current.record_id or overridden_at >= current_at:
         return None
     return {
         "record_id": o.decision_record_id,
@@ -108,9 +114,14 @@ def _custody_window(
     charge: Charge | None, body: EvidenceRecord | None, rec: DecisionRecord, cfg: EngineConfig
 ) -> dict[str, Any] | None:
     """The window in which this pod's records can speak to the charge, as the engine used it.
-    Computed from the engine config only when it is the config the decision was made with
-    (same config hash); otherwise null, and the stored `why` text is the record of it."""
-    if charge is None or body is None or cfg.config_hash != rec.config_hash:
+    Computed only when the engine config and the stored charge are the ones the decision was
+    made with (same hashes); otherwise null, and the stored `why` text is the record of it."""
+    if (
+        charge is None
+        or body is None
+        or cfg.config_hash != rec.config_hash
+        or charge.compute_hash() != rec.subject.charge_content_hash
+    ):
         return None
     rel = cfg.charge_types[charge.charge_type].pods.get(body.agent)  # type: ignore[call-overload]
     if rel is None:
@@ -126,22 +137,38 @@ def _custody_window(
     }
 
 
-def _deadline(rec: DecisionRecord) -> dict[str, Any]:
-    """The filing deadline status, from the decision's `within_filing_window` check:
-    open (PASS), closed or not yet open (FAIL), or not verified (UNCERTAIN, no sourced rule)."""
-    c = next((x for x in rec.checks if x.check_key == "within_filing_window"), None)
-    if c is None:
-        return {"status": "unknown", "verdict": None, "detail": "not checked"}
-    detail = c.detail or ""
-    if c.verdict == Verdict.PASS:
-        state = "open"
-    elif c.verdict == Verdict.UNCERTAIN:
-        state = "not_verified"
-    elif NOT_YET_ELIGIBLE in detail:
-        state = "not_yet_open"
-    else:
-        state = "passed"
-    return {"status": state, "verdict": c.verdict.value, "detail": detail}
+_STATE = {"open": "open", "passed": "passed", "not_open": "not_yet_open", "unknown": "not_verified"}
+
+
+def _deadline(
+    rec: DecisionRecord, charge: Charge | None, rules: ChannelRules, today: date
+) -> dict[str, Any]:
+    """The filing deadline judged today from the sourced rules (open, passed, not yet open,
+    or not verified when no rule is sourced), plus what the decision's own check said at the
+    run's as-of date. Today is what a reviewer acts on; a run may be days old."""
+    at_decision = next((x for x in rec.checks if x.check_key == "within_filing_window"), None)
+    decided = {
+        "verdict": at_decision.verdict.value if at_decision else None,
+        "detail": at_decision.detail if at_decision else None,
+    }
+    if charge is None or charge.compute_hash() != rec.subject.charge_content_hash:
+        return {
+            "status": "unknown",
+            "as_of": today.isoformat(),
+            "opens": None,
+            "deadline": None,
+            "detail": "the charge is not in the store as decided",
+            "at_decision": decided,
+        }
+    fw = filing_window(charge, rules, today)
+    return {
+        "status": _STATE[fw.state],
+        "as_of": today.isoformat(),
+        "opens": fw.opens.isoformat() if fw.opens else None,
+        "deadline": fw.deadline.isoformat() if fw.deadline else None,
+        "detail": fw.detail,
+        "at_decision": decided,
+    }
 
 
 @router.get("/runs")
@@ -191,7 +218,7 @@ def list_decisions(
                 ovs = overrides.get(d.record_id, [])
                 item = _summary(d, ovs, _problems(session, d, ovs))
                 item["earlier_override"] = _earlier_override(
-                    newest.get(d.subject.line_id), d.record_id
+                    newest.get(d.subject.line_id), d, run.decided_at
                 )
                 items.append(item)
     except SQLAlchemyError as exc:
@@ -268,7 +295,10 @@ def get_decision(record_id: str, org: Org, engine: Db) -> dict[str, Any]:
                 history.append(_summary(d, ovs, _problems(session, d, ovs)))
             problems = _problems(session, rec, overrides)
             is_newest = line_decisions[-1].record_id == rec.record_id
-            claim_blocked = claim_refusal(rec, cfg)
+            rules = load_rules()
+            today = datetime.now(UTC).date()
+            claim_blocked = claim_refusal_now(session, rec, cfg, rules, today)
+            deadline = _deadline(rec, charge, rules, today)
     except SQLAlchemyError as exc:
         raise _unavailable(exc) from None
     return {
@@ -279,7 +309,7 @@ def get_decision(record_id: str, org: Org, engine: Db) -> dict[str, Any]:
         # Whether the override form may be used, and why CLAIM is not offered (D-021).
         "overridable": is_newest,
         "claim_refusal": claim_blocked,
-        "deadline": _deadline(rec),
+        "deadline": deadline,
         "charge": charge.model_dump(mode="json") if charge else None,
         "evidence": evidence,
         "line_history": history,

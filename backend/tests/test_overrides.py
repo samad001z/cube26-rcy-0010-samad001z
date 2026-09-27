@@ -6,6 +6,7 @@ import threading
 import time
 import uuid
 from collections.abc import Sequence
+from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
@@ -346,7 +347,11 @@ def _store_variant(engine: Engine, org: str, d: DecisionRecord, **update: Any) -
     return v
 
 
-def _with_check(d: DecisionRecord, key: str, verdict: str, detail: str) -> list[Check]:
+def _with_check(
+    d: DecisionRecord, key: str, verdict: str | None, detail: str | None
+) -> list[Check]:
+    if verdict is None:  # the check is missing from the record altogether
+        return [c for c in d.checks if c.check_key != key]
     return [
         c.model_copy(update={"verdict": Verdict(verdict), "detail": detail})
         if c.check_key == key
@@ -373,8 +378,12 @@ def test_sample_loss_event_past_its_deadline_cannot_be_claimed(app_engine, loade
     "variant, refusal",
     [
         ({"charge_type": ChargeType.LOST_INBOUND}, "loss event is never CLAIM"),
+        # rules-guardian H1: a weight-tier fee is owed only the overcharge, not the fee
+        ({"charge_type": ChargeType.FULFILMENT_FEE_WEIGHT_TIER}, "fee_difference"),
+        (("amount_computable", "FAIL", "needs an unsourced fee schedule"), "not the charge"),
         ({"report_type": ReportType.REIMBURSEMENT_REPORT}, "refund of a fee"),
         (("within_filing_window", "FAIL", "deadline 2026-01-01 passed"), "filing window"),
+        (("within_filing_window", None, None), "filing window does not allow a claim: not"),
         (("within_filing_window", "FAIL", "not yet eligible"), "filing window"),
         (("not_already_reimbursed", "UNCERTAIN", "refund may belong to FEE-9"), "not settled"),
         (("not_already_reimbursed", "FAIL", "fully reimbursed"), "not settled"),
@@ -401,13 +410,81 @@ def test_human_claim_is_refused_when_the_engine_could_not_settle_what_is_owed(
         ]
 
 
-def test_human_claim_goes_through_the_citation_validator(app_engine, loaded):
-    """A reimbursed amount the cited refund lines do not back is refused by the validator,
-    re-reading the store, before anything is written."""
+def test_human_claim_rechecks_reimbursements_in_the_store(app_engine, loaded):
+    """The decision says 0.50 was reimbursed but no refund line in the store backs it (or a
+    refund arrived after the run): the reimbursements are re-matched now and the CLAIM is
+    refused until the charge is re-run (rules-guardian H2)."""
     org = _org()
     d = _setup(app_engine, org)["SYN-2"]
     v = _store_variant(app_engine, org, d, amount_reimbursed=Decimal("0.50"))
-    with pytest.raises(OverrideError, match=r"does not validate: amount_reimbursed 0\.50") as err:
+    with pytest.raises(OverrideError, match=r"store now shows 0\.00 USD reimbursed") as err:
+        _override(app_engine, org, v.record_id, _req(Decision.CLAIM))
+    assert err.value.status == 409
+    with org_session(app_engine, org) as s:
+        assert repo.list_overrides(s, v.record_id) == []
+
+
+def test_refund_ingested_after_the_run_blocks_a_human_claim(app_engine, loaded):
+    org = _org()
+    d = _setup(app_engine, org)["SYN-2"]
+    refund = charge("SYN-R", unit_id="U-2", org=org, report_type=ReportType.REIMBURSEMENT_REPORT)
+    with org_session(app_engine, org) as s:
+        fid = repo.upsert_ingest_file(s, org, "refunds.csv", uuid.uuid4().hex * 2, "fee_report")
+        repo.insert_charges(s, [refund], fid)
+    with pytest.raises(OverrideError, match="re-run the charge") as err:
+        _override(app_engine, org, d.record_id, _req(Decision.CLAIM))
+    assert err.value.status == 409
+    _, eff = _override(app_engine, org, d.record_id, _req(Decision.DO_NOT_CLAIM))
+    assert eff.decision == Decision.DO_NOT_CLAIM
+
+
+def test_refund_that_could_belong_to_two_fees_blocks_a_human_claim(app_engine, loaded):
+    """After the run, a second fee on the same unit and one refund arrive: the refund could
+    belong to either fee, so nothing is allocated (reimbursed stays 0.00, as decided) and
+    only the ambiguity check stops a CLAIM of the full fee."""
+    org = _org()
+    d = _setup(app_engine, org)["SYN-2"]
+    later_fee = charge("SYN-3", unit_id="U-2", org=org, amount="3.00")
+    refund = charge("SYN-R", unit_id="U-2", org=org, report_type=ReportType.REIMBURSEMENT_REPORT)
+    with org_session(app_engine, org) as s:
+        fid = repo.upsert_ingest_file(s, org, "later.csv", uuid.uuid4().hex * 2, "fee_report")
+        repo.insert_charges(s, [later_fee, refund], fid)
+    with pytest.raises(OverrideError, match="SYN-R could now belong to this fee") as err:
+        _override(app_engine, org, d.record_id, _req(Decision.CLAIM))
+    assert err.value.status == 409
+
+
+def test_filing_window_is_judged_on_the_override_day(app_engine, loaded, monkeypatch):
+    """A window open at the run's as-of date but closed on the day of the override."""
+    org = _org()
+    d = _setup(app_engine, org)["SYN-2"]
+    real = __import__("app.review", fromlist=["run_prechecks"]).run_prechecks
+
+    def closed_today(charges, rules, cfg, today):
+        out = real(charges, rules, cfg, today)
+        pre = out[d.subject.line_id]
+        out[d.subject.line_id] = replace(
+            pre, filing=replace(pre.filing, verdict=Verdict.FAIL, detail="deadline passed")
+        )
+        return out
+
+    monkeypatch.setattr("app.review.run_prechecks", closed_today)
+    with pytest.raises(OverrideError, match="does not allow a claim today: deadline passed"):
+        _override(app_engine, org, d.record_id, _req(Decision.CLAIM))
+
+
+def test_human_claim_goes_through_the_citation_validator(app_engine, loaded):
+    """Everything claim_refusal checks is fine, but the decision's subject hash no longer
+    matches the stored charge: the validator, re-reading the store, refuses the CLAIM."""
+    org = _org()
+    d = _setup(app_engine, org)["SYN-2"]
+    v = _store_variant(
+        app_engine,
+        org,
+        d,
+        subject=d.subject.model_copy(update={"charge_content_hash": "0" * 64}),
+    )
+    with pytest.raises(OverrideError, match="does not validate: charge SYN-2 hash") as err:
         _override(app_engine, org, v.record_id, _req(Decision.CLAIM))
     assert err.value.status == 409
     with org_session(app_engine, org) as s:
@@ -535,3 +612,120 @@ def test_a_rehashed_claim_above_the_cap_is_detected(app_engine, owner_engine, lo
     assert stored[0].verify_hash()
     problems = check_chain(d, stored)
     assert len(problems) == 1 and "is not the charge not yet reimbursed" in problems[0]
+
+
+def test_sample_weight_tier_fee_cannot_be_claimed_in_full(app_engine, loaded):
+    """rules-guardian H1 on the sample: FEE-0002-1 (weight-tier, 4.25) is owed only the
+    difference to the correct fee, which no sourced schedule gives."""
+    with org_session(app_engine, ALPHA) as s:
+        d = repo.list_decisions_for_line(s, "FEE-0002-1")[-1]
+    with pytest.raises(OverrideError, match="fee_difference") as err:
+        _override(app_engine, ALPHA, d.record_id, _req(Decision.CLAIM))
+    assert err.value.status == 409
+
+
+# --- chain checks and audit payload (test-guardian second review) -----------------------
+
+
+def test_check_chain_catches_claim_on_the_wrong_decision_and_wrong_currency(app_engine, loaded):
+    org = _org()
+    d = _setup(app_engine, org)["SYN-2"]
+    rec, _ = _override(app_engine, org, d.record_id, _req(Decision.CLAIM))
+    assert rec.claim is not None
+    dnc_with_claim = rec.model_copy(
+        update={"override": rec.override.model_copy(update={"new_decision": "DO_NOT_CLAIM"})}
+    ).with_hash()
+    assert check_chain(d, [dnc_with_claim]) == [
+        "override 1: claim amount does not match its decision"
+    ]
+    claim_without = rec.model_copy(update={"claim": None}).with_hash()
+    assert check_chain(d, [claim_without]) == [
+        "override 1: claim amount does not match its decision"
+    ]
+    eur = rec.model_copy(
+        update={"claim": rec.claim.model_copy(update={"currency": "EUR"})}
+    ).with_hash()
+    problems = check_chain(d, [eur])
+    assert len(problems) == 1 and "is not the charge not yet reimbursed" in problems[0]
+
+
+def test_audit_event_carries_reason_and_the_previous_override_hash(app_engine, loaded):
+    org = _org()
+    d = _setup(app_engine, org)["SYN-2"]
+    first, _ = _override(app_engine, org, d.record_id, _req(Decision.DO_NOT_CLAIM, "first why"))
+    second, _ = _override(app_engine, org, d.record_id, _req(Decision.REVIEW, "second why"))
+    with org_session(app_engine, org) as s:
+        events: Sequence[Any] = (
+            s.execute(
+                sa.select(t.audit_events.c.payload)
+                .where(t.audit_events.c.event_type == "DECISION_OVERRIDDEN")
+                .order_by(t.audit_events.c.at)
+            )
+            .scalars()
+            .all()
+        )
+    assert [(e["reason"], e["previous_override_hash"], e["content_hash"]) for e in events] == [
+        ("first why", None, first.content_hash),
+        ("second why", first.content_hash, second.content_hash),
+    ]
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        {"sequence": 7},
+        {"original_decision": "CLAIM"},
+        # the database refuses new == original, so swap both (the body says REVIEW -> DNC)
+        {"original_decision": "DO_NOT_CLAIM", "new_decision": "REVIEW"},
+        {"reason": "edited"},
+        {"reviewer": "mallory"},
+        {"content_hash": "0" * 64},
+        {"line_id": "SYN-1"},
+    ],
+)
+def test_every_indexed_column_is_compared_with_the_body(app_engine, owner_engine, loaded, values):
+    """One tampered column on one decision is reported for that decision only."""
+    org = _org()
+    by_line = _setup(app_engine, org)
+    d, sibling = by_line["SYN-2"], by_line["SYN-1"]
+    _override(app_engine, org, d.record_id, _req(Decision.DO_NOT_CLAIM))
+    _override(app_engine, org, sibling.record_id, _req(Decision.REVIEW))
+    with owner_engine.begin() as conn:
+        conn.execute(text("SELECT set_config('app.current_org', :org, true)"), {"org": org})
+        conn.execute(
+            sa.update(t.decision_overrides)
+            .where(t.decision_overrides.c.decision_record_id == d.record_id)
+            .values(values)
+        )
+    with org_session(app_engine, org) as s:
+        assert repo.override_column_problems(s, d.record_id) == [
+            f"override {values.get('sequence', 1)}: stored columns do not match its body"
+        ]
+        assert repo.override_column_problems(s, sibling.record_id) == []
+
+
+def test_claim_amount_column_is_compared_with_the_body(app_engine, owner_engine, loaded):
+    org = _org()
+    d = _setup(app_engine, org)["SYN-2"]
+    _override(app_engine, org, d.record_id, _req(Decision.CLAIM))
+    with owner_engine.begin() as conn:
+        conn.execute(text("SELECT set_config('app.current_org', :org, true)"), {"org": org})
+        conn.execute(
+            sa.update(t.decision_overrides)
+            .where(t.decision_overrides.c.decision_record_id == d.record_id)
+            .values(claim_amount=Decimal("1.99"))
+        )
+    with org_session(app_engine, org) as s:
+        assert repo.override_column_problems(s, d.record_id) == [
+            "override 1: stored columns do not match its body"
+        ]
+
+
+def test_a_charge_missing_from_the_store_blocks_a_human_claim(app_engine, owner_engine, loaded):
+    org = _org()
+    d = _setup(app_engine, org)["SYN-2"]
+    v = _store_variant(
+        app_engine, org, d, subject=d.subject.model_copy(update={"line_id": "SYN-GONE"})
+    )
+    with pytest.raises(OverrideError, match="charge is not in the store"):
+        _override(app_engine, org, v.record_id, _req(Decision.CLAIM))

@@ -152,15 +152,17 @@ organisation's record answers 404, like a missing one. A database failure answer
 - `GET /decisions/{id}`: effective and engine records, override history, integrity
   problems, the charge, every evidence record read (cited or not, `captured_at`,
   `custody_window` with its start, exclusive end and whether the record falls inside, hash
-  checks), a top-level `deadline` (open, passed, not yet open, not verified), earlier
+  checks), a top-level `deadline` judged today from the sourced rules (open, passed, not
+  yet open, not verified) with the run's own check beside it, earlier
   decisions of the line, whether it can be overridden (newest decision only) and
   `claim_refusal`.
 - `POST /decisions/{id}/overrides` `{new_decision, reason, reviewer}`: stores one override
   in `decision_overrides` (append-only for the app role, forced RLS). The engine's decision
   row is never changed. A human CLAIM claims charged minus reimbursed, is refused where the
-  engine could not settle what is owed (pending, loss event, fee refund line, filing window
-  closed or not open, reimbursement not settled, older run) and goes through the citation
-  validator. Every override writes a `DECISION_OVERRIDDEN` audit event.
+  engine could not settle what is owed (pending, loss event, fee refund line, an amount
+  that is not the charge itself, filing window closed or not open, reimbursement not
+  settled, older run) or where the store changed since the run (refunds re-matched, window
+  judged today), and goes through the citation validator. Every override writes a `DECISION_OVERRIDDEN` audit event.
 
 Review UI (`frontend/`, Next.js): sign-in with the org key into an httpOnly cookie; the
 decisions list (equal-weight CLAIM / DO NOT CLAIM / REVIEW totals, filters); the decision

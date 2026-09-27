@@ -26,7 +26,7 @@ Each override stores the content hash of the engine record and of the previous o
 - An override must change the effective decision; a no-op is refused.
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Annotated, Any, Self
 
@@ -36,12 +36,13 @@ from sqlalchemy.orm import Session
 
 from app.claims.validator import validate
 from app.core.hashing import content_hash
-from app.core.rules import EngineConfig, load_engine_config
+from app.core.rules import ChannelRules, EngineConfig, load_engine_config, load_rules
 from app.db import repo
 from app.models.contract import Check, Outcome, Override
 from app.models.decision import Claim, DecisionRecord
 from app.models.vocab import Decision, RecordStatus, ReportType, Verdict
 from app.pipeline import DbLookup
+from app.precheck import run_prechecks
 
 ZERO = Decimal("0.00")
 HUMAN_PREFIX = "human:"
@@ -181,6 +182,14 @@ def claim_refusal(engine: DecisionRecord, cfg: EngineConfig) -> str | None:
         and cfg.charge_types[engine.subject.charge_type].kind == "fee"
     ):
         return "this line is a refund of a fee (money back to the seller), not a charge"
+    ct = cfg.charge_types[engine.subject.charge_type]
+    amount = _check(engine, "amount_computable")
+    if ct.claim_basis != "full_amount" or amount is None or amount.verdict != Verdict.PASS:
+        detail = amount.detail if amount else "not recorded"
+        return (
+            f"the amount owed is not the charge itself ({ct.claim_basis}): {detail}; an "
+            "override can only claim the full remaining charge"
+        )
     window = _check(engine, "within_filing_window")
     if window is None or window.verdict == Verdict.FAIL:
         detail = window.detail if window else "not recorded"
@@ -197,8 +206,42 @@ def claim_refusal(engine: DecisionRecord, cfg: EngineConfig) -> str | None:
     return None
 
 
-def _override_claim(engine: DecisionRecord, reviewer: str, cfg: EngineConfig) -> Claim:
+def claim_refusal_now(
+    session: Session, engine: DecisionRecord, cfg: EngineConfig, rules: ChannelRules, today: date
+) -> str | None:
+    """`claim_refusal`, plus what may have changed since the run: refund lines ingested
+    after it (re-matched over every stored charge, as the pre-checks do) and the filing
+    window judged today rather than at the run's as-of date."""
     refusal = claim_refusal(engine, cfg)
+    if refusal is not None:
+        return refusal
+    charges = repo.list_charges(session)
+    charge = next((c for c in charges if c.line_id == engine.subject.line_id), None)
+    if charge is None:
+        return "the charge is not in the store"
+    pre = run_prechecks(charges, rules, cfg, today)[charge.line_id]
+    if pre.ambiguous_reimbursements:
+        ids = ", ".join(r.line_id for r in pre.ambiguous_reimbursements)
+        return f"refund line(s) {ids} could now belong to this fee; re-run the charge first"
+    if pre.reimbursed_amount != engine.amount_reimbursed:
+        return (
+            f"the store now shows {pre.reimbursed_amount} {engine.currency} reimbursed, the "
+            f"decision {engine.amount_reimbursed}; re-run the charge before claiming it"
+        )
+    if pre.filing.verdict == Verdict.FAIL:
+        return f"the filing window does not allow a claim today: {pre.filing.detail}"
+    return None
+
+
+def _override_claim(
+    session: Session,
+    engine: DecisionRecord,
+    reviewer: str,
+    cfg: EngineConfig,
+    rules: ChannelRules,
+    today: date,
+) -> Claim:
+    refusal = claim_refusal_now(session, engine, cfg, rules, today)
     if refusal is not None:
         raise OverrideError(refusal, 409)
     remaining = engine.amount_charged - engine.amount_reimbursed
@@ -227,6 +270,7 @@ def apply_override(
     Serialised per decision with a transaction-scoped advisory lock, so two reviewers
     cannot both override from the same starting decision."""
     cfg = cfg or load_engine_config()
+    rules = load_rules()
     session.execute(
         text("SELECT pg_advisory_xact_lock(hashtext(:k))"),
         {"k": f"override:{organization_id}:{record_id}"},
@@ -249,7 +293,9 @@ def apply_override(
     if req.new_decision == current:
         raise OverrideError(f"the decision is already {current.value}", 409)
     claim = (
-        _override_claim(engine, req.reviewer, cfg) if req.new_decision == Decision.CLAIM else None
+        _override_claim(session, engine, req.reviewer, cfg, rules, at.date())
+        if req.new_decision == Decision.CLAIM
+        else None
     )
     rec = OverrideRecord(
         decision_record_id=engine.record_id,
@@ -277,6 +323,10 @@ def apply_override(
         if errors:
             raise OverrideError("the claim does not validate: " + "; ".join(errors), 409)
     repo.insert_override(session, organization_id, rec)
+    # A run may have committed a newer decision of this line since the check above; the
+    # transaction is rolled back on this error, so the override is never stored.
+    if repo.list_decisions_for_line(session, engine.subject.line_id)[-1].record_id != record_id:
+        raise OverrideError("a newer run decided this charge line meanwhile; reload", 409)
     repo.add_audit_event(
         session,
         organization_id,

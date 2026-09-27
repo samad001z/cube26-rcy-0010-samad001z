@@ -3,7 +3,10 @@ comes back with hash checks, overrides go through the API, and a failed database
 503 instead of a partial answer."""
 
 import uuid
+from collections import Counter
 from collections.abc import Iterator
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -14,15 +17,19 @@ from app.api.auth import configured_keys, hash_key, parse_api_keys
 from app.db import repo
 from app.db.session import org_session
 from app.main import app
+from app.models.charge import Charge, SourceRef
+from app.models.contract import EvidenceRecord
 from app.models.decision import DecisionRecord
+from app.models.vocab import ChargeType
 from app.pipeline import run_org
 from tests.conftest import ALPHA, AS_OF, BRAVO
+from tests.factories import charge, prep_all_pass
 from tests.test_overrides import _setup
 
 ALPHA_KEY, BRAVO_KEY = "alpha-review-key-000000000", "bravo-review-key-111111111"
 # One synthetic org per tampering test, so no test sees another's edits.
 _RUN = uuid.uuid4().hex[:8]
-SYN_ORGS = {f"org_test_api_rev_{_RUN}_{n}": f"synthetic-review-key-{n}-{_RUN}" for n in range(4)}
+SYN_ORGS = {f"org_test_api_rev_{_RUN}_{n}": f"synthetic-review-key-{n}-{_RUN}" for n in range(8)}
 
 
 def _keys() -> dict[str, str]:
@@ -356,13 +363,24 @@ def test_detail_gives_captured_at_custody_window_and_deadline_as_fields(client, 
     statuses = {}
     for x in decisions:
         got = client.get(f"/decisions/{x.record_id}", headers=_h(ALPHA_KEY)).json()["deadline"]
-        verdict = x.check("within_filing_window").verdict.value
-        assert got["verdict"] == verdict
-        assert got["detail"] == x.check("within_filing_window").detail
-        statuses[x.subject.line_id] = got["status"]
-    assert statuses["FEE-0071-2"] == "passed"
-    assert {"passed", "not_verified"} <= set(statuses.values())
-    assert set(statuses.values()) <= {"open", "passed", "not_yet_open", "not_verified"}
+        # What the run's own check said is kept next to today's judgement.
+        assert got["at_decision"] == {
+            "verdict": x.check("within_filing_window").verdict.value,
+            "detail": x.check("within_filing_window").detail,
+        }
+        assert got["as_of"] == datetime.now(UTC).date().isoformat()
+        statuses[x.subject.line_id] = got
+    passed = statuses["FEE-0071-2"]  # damaged in warehouse, 60-day window long closed
+    assert passed["status"] == "passed" and passed["deadline"] is not None
+    assert passed["deadline"] < passed["as_of"]
+    weight = next(g for line, g in statuses.items() if line == "FEE-0002-1")
+    assert weight["status"] == "not_verified" and weight["deadline"] is None
+    assert {g["status"] for g in statuses.values()} <= {
+        "open",
+        "passed",
+        "not_yet_open",
+        "not_verified",
+    }
 
 
 def test_decisions_filter_by_effective_decision_charge_type_and_rule(client, app_engine):
@@ -397,3 +415,176 @@ def test_decisions_filter_by_effective_decision_charge_type_and_rule(client, app
     assert overridden["record_id"] not in {i["record_id"] for i in by_engine}
     assert client.get("/decisions", params={"decision": "MAYBE"}, headers=h).status_code == 422
     assert client.get("/decisions", params={"charge_type": "x"}, headers=h).status_code == 422
+
+
+# --- test-guardian second review: filters one at a time, earlier-override selection, ---
+# --- deadline states judged today, custody window edges and guards                   ---
+
+
+def _load(engine: Engine, org: str, charges: list[Charge], records: list[EvidenceRecord]):
+    with org_session(engine, org) as s:
+        fid = repo.upsert_ingest_file(s, org, "syn.csv", uuid.uuid4().hex * 2, "fee_report")
+        repo.insert_charges(s, charges, fid)
+        if records:
+            refs = {
+                (r.agent, r.record_id): SourceRef(file_sha256="c" * 64, row=i, raw={})
+                for i, r in enumerate(records)
+            }
+            repo.insert_records(s, records, refs, fid)
+    return {d.subject.line_id: d for d in run_org(engine, org, AS_OF).decisions}
+
+
+def test_each_filter_works_on_its_own_and_counts_are_effective(client):
+    h = _h(ALPHA_KEY)
+    full = client.get("/decisions", headers=h).json()
+    items = full["items"]
+    types = {i["charge_type"] for i in items}
+    rules = {i["rule_id"] for i in items}
+    assert len(types) > 1 and len(rules) > 1  # otherwise a dropped filter would go unseen
+    for ct in types:
+        got = client.get("/decisions", params={"charge_type": ct}, headers=h).json()["items"]
+        assert [i["record_id"] for i in got] == [
+            i["record_id"] for i in items if i["charge_type"] == ct
+        ]
+    for rule in rules:
+        got = client.get("/decisions", params={"rule_id": rule}, headers=h).json()["items"]
+        assert [i["record_id"] for i in got] == [
+            i["record_id"] for i in items if i["rule_id"] == rule
+        ]
+    effective = Counter(i["decision"] for i in items)
+    engine = Counter(i["engine_decision"] for i in items)
+    assert effective != engine  # the `loaded` fixture overrode one alpha decision
+    assert full["counts"] == {d: effective.get(d, 0) for d in ("CLAIM", "DO_NOT_CLAIM", "REVIEW")}
+
+
+def _override_api(client, key: str, record_id: str, new: str, reason: str, who: str = "a"):
+    r = client.post(
+        f"/decisions/{record_id}/overrides",
+        json={"new_decision": new, "reason": reason, "reviewer": who},
+        headers=_h(key),
+    )
+    assert r.status_code == 201, r.text
+
+
+def test_earlier_override_is_the_newest_one_from_an_earlier_run_only(client, app_engine):
+    org, key = _syn(3)
+    run1 = _setup(app_engine, org)["SYN-2"]
+    _override_api(client, key, run1.record_id, "DO_NOT_CLAIM", "run one says close")
+    run2 = {d.subject.line_id: d for d in run_org(app_engine, org, AS_OF).decisions}["SYN-2"]
+    _override_api(client, key, run2.record_id, "DO_NOT_CLAIM", "run two first", "b")
+    _override_api(client, key, run2.record_id, "REVIEW", "run two second", "c")
+    run3 = {d.subject.line_id: d for d in run_org(app_engine, org, AS_OF).decisions}["SYN-2"]
+
+    def row(run_id: str) -> dict[str, Any]:
+        items = client.get("/decisions", params={"run_id": run_id}, headers=_h(key)).json()
+        return next(i for i in items["items"] if i["line_id"] == "SYN-2")
+
+    newest = row(run3.run_id)["earlier_override"]
+    assert newest is not None
+    assert (newest["record_id"], newest["decision"], newest["reviewer"]) == (
+        run2.record_id,
+        "REVIEW",
+        "c",
+    )
+    assert row(run2.run_id)["earlier_override"] is None  # its own override is not "earlier"
+    assert row(run1.run_id)["earlier_override"] is None  # run two's is later, not earlier
+
+
+def test_deadline_states_are_judged_today(client, app_engine):
+    org, key = _syn(4)
+    today = datetime.now(UTC).date()
+    refund = ChargeType.REFUND_ISSUED_ITEM_NOT_RETURNED
+    decided = _load(
+        app_engine,
+        org,
+        [
+            charge(
+                "REF-OPEN",
+                org=org,
+                charge_type=refund,
+                posted=today - timedelta(days=90),
+                order_id="O-1",
+                unit_id="U-A",
+                amount="0.00",
+            ),
+            charge(
+                "REF-SOON",
+                org=org,
+                charge_type=refund,
+                posted=today - timedelta(days=10),
+                order_id="O-2",
+                unit_id="U-B",
+                amount="0.00",
+            ),
+            charge(
+                "REF-GONE",
+                org=org,
+                charge_type=refund,
+                posted=today - timedelta(days=200),
+                order_id="O-3",
+                unit_id="U-C",
+                amount="0.00",
+            ),
+        ],
+        [],
+    )
+    got = {
+        line: client.get(f"/decisions/{d.record_id}", headers=_h(key)).json()["deadline"]
+        for line, d in decided.items()
+    }
+    assert got["REF-OPEN"]["status"] == "open"
+    assert got["REF-OPEN"]["deadline"] == (today + timedelta(days=30)).isoformat()
+    assert got["REF-SOON"]["status"] == "not_yet_open"
+    assert got["REF-SOON"]["opens"] == (today + timedelta(days=50)).isoformat()
+    assert got["REF-GONE"]["status"] == "passed"
+    # A decision recorded 60 days ago: then the window was not yet open, today it is. The
+    # page shows today's state, with the decision's own check kept beside it.
+    old = decided["REF-OPEN"]
+    aged = old.model_copy(
+        update={
+            "record_id": f"{old.record_id}-aged",
+            "run_id": str(uuid.uuid4()),
+            "captured_at": old.captured_at - timedelta(days=60),
+        }
+    ).with_hash()
+    with org_session(app_engine, org) as s:
+        repo.insert_decision(s, aged)
+    aged_got = client.get(f"/decisions/{aged.record_id}", headers=_h(key)).json()["deadline"]
+    assert aged_got["status"] == "open" and aged_got["as_of"] == today.isoformat()
+
+
+def test_custody_window_end_is_exclusive_and_outside_records_say_so(client, app_engine):
+    org, key = _syn(5)
+    posted_midnight = datetime(2026, 7, 18, tzinfo=UTC)  # the factory charge's posted date
+    decided = _load(
+        app_engine,
+        org,
+        [charge("SYN-W", org=org, defect_category="label")],
+        [
+            prep_all_pass("PRP-IN", org=org, captured=posted_midnight - timedelta(seconds=1)),
+            prep_all_pass("PRP-EDGE", org=org, captured=posted_midnight),
+        ],
+    )
+    body = client.get(f"/decisions/{decided['SYN-W'].record_id}", headers=_h(key)).json()
+    ev = {e["record_id"]: e for e in body["evidence"]}
+    assert ev["PRP-IN"]["custody_window"]["captured_inside"] is True
+    assert ev["PRP-EDGE"]["custody_window"]["captured_inside"] is False
+    assert ev["PRP-EDGE"]["custody_window"]["end"] == "2026-07-18T00:00:00Z"
+    assert ev["PRP-IN"]["usable"] and not ev["PRP-EDGE"]["usable"]
+
+
+def test_custody_window_is_withheld_when_the_engine_config_changed(client, app_engine, monkeypatch):
+    org, key = _syn(6)
+    decided = _load(
+        app_engine,
+        org,
+        [charge("SYN-C", org=org, defect_category="label")],
+        [prep_all_pass("PRP-C", org=org)],
+    )
+    from app.core.rules import load_engine_config
+
+    changed = load_engine_config().model_copy(update={"config_hash": "f" * 64})
+    monkeypatch.setattr("app.api.review.load_engine_config", lambda: changed)
+    body = client.get(f"/decisions/{decided['SYN-C'].record_id}", headers=_h(key)).json()
+    assert [e["custody_window"] for e in body["evidence"]] == [None]
+    assert "inside custody window" in body["evidence"][0]["why"]  # the stored text remains

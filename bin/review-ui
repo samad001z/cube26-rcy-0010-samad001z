@@ -14,6 +14,16 @@ ALPHA_KEY="${ALIBI_DEV_KEY_ALPHA:-dev-only-alpha-review-key}"
 BRAVO_KEY="${ALIBI_DEV_KEY_BRAVO:-dev-only-bravo-review-key}"
 
 cd "$ROOT/backend"
+# Dev only: refuse to write demo runs into anything but a local database.
+db_host="$(uv run python -c '
+from sqlalchemy.engine import make_url
+from app.core.config import get_settings
+print(make_url(get_settings().database_url).host or "")
+')"
+case "$db_host" in
+  localhost|127.0.0.1|::1) ;;
+  *) echo "review-ui: DATABASE_URL host is '$db_host', not local; refusing (dev only)" >&2; exit 2 ;;
+esac
 uv run alembic upgrade head
 
 ALIBI_API_KEYS="$(uv run python -c '
@@ -38,7 +48,7 @@ with org_session(get_engine(), sys.argv[1]) as s:
   fi
 done
 
-uv run uvicorn app.main:app --port "$API_PORT" &
+uv run uvicorn app.main:app --host 127.0.0.1 --port "$API_PORT" &
 API_PID=$!
 trap 'kill "$API_PID" 2>/dev/null || true' EXIT INT TERM
 
@@ -61,4 +71,4 @@ cat <<EOF
     org_demo_bravo  $BRAVO_KEY
 
 EOF
-ALIBI_BACKEND_URL="http://localhost:$API_PORT" npm run dev
+ALIBI_BACKEND_URL="http://localhost:$API_PORT" npm run dev -- -H 127.0.0.1

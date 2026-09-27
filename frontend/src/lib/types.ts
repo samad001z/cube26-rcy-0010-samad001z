@@ -150,10 +150,14 @@ export interface CustodyWindow {
   captured_inside: boolean;
 }
 
+/** The filing deadline judged today from the sourced rules, and what the run's check said. */
 export interface Deadline {
   status: "open" | "passed" | "not_yet_open" | "not_verified" | "unknown";
-  verdict: Verdict | null;
+  as_of: string;
+  opens: string | null;
+  deadline: string | null;
   detail: string;
+  at_decision: { verdict: Verdict | null; detail: string | null };
 }
 
 export interface EvidenceItem {

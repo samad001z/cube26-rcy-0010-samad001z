@@ -37,13 +37,21 @@ function windowSentence(e: EvidenceItem): string | null {
   );
 }
 
-const DEADLINE_TEXT: Record<Deadline["status"], string> = {
-  open: "The filing window is open: a claim can still be filed.",
-  passed: "The filing deadline has passed: no claim can be filed.",
-  not_yet_open: "The filing window has not opened yet: a claim cannot be filed before it opens.",
-  not_verified: "No sourced filing deadline for this charge type: the deadline is not verified.",
-  unknown: "The filing deadline was not checked.",
-};
+function deadlineText(d: Deadline): string {
+  const today = day(d.as_of);
+  switch (d.status) {
+    case "open":
+      return `As of today (${today}) the filing window is open; the deadline is ${d.deadline ? day(d.deadline) : "not stated"}.`;
+    case "passed":
+      return `The filing deadline${d.deadline ? ` (${day(d.deadline)})` : ""} has passed: no claim can be filed.`;
+    case "not_yet_open":
+      return `The filing window opens ${d.opens ? day(d.opens) : "later"}; a claim cannot be filed before then.`;
+    case "not_verified":
+      return "No sourced filing deadline for this charge type: the deadline is not verified.";
+    default:
+      return `The filing deadline could not be worked out: ${d.detail}.`;
+  }
+}
 
 function EvidenceCard({ e }: { e: EvidenceItem }) {
   const hashOk = e.hash_matches_decision && e.record_hash_verifies;
@@ -167,9 +175,11 @@ export default async function DecisionPage({ params }: PageProps<"/decisions/[id
             )}
             <p className={`mt-3 text-sm ${d.deadline.status === "passed" || d.deadline.status === "not_yet_open" ? "text-fail" : ""}`}>
               <span className="font-semibold">Deadline: </span>
-              {DEADLINE_TEXT[d.deadline.status]}
-              {d.deadline.detail && <span className="text-xs text-muted"> ({d.deadline.detail})</span>}
+              {deadlineText(d.deadline)}
             </p>
+            {d.deadline.at_decision.detail && (
+              <p className="mt-0.5 text-xs text-muted">When decided: {d.deadline.at_decision.detail}</p>
+            )}
             {r.warnings.length > 0 && (
               <ul className="mt-3 space-y-1">
                 {r.warnings.map((w) => (

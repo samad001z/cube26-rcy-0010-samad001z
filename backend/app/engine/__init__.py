@@ -277,8 +277,9 @@ def _fire(
             "not_already_reimbursed",
             f"refund line(s) {ids} could belong to this fee or to another fee on the same unit, "
             "so what is already reimbursed cannot be computed.",
-            "Match the refund to its fee (e.g. by reimbursement or case id in Seller Central), "
-            "then decide by override.",
+            "Match the refund to its fee (e.g. by reimbursement or case id in Seller Central) "
+            "and re-run; until then an override can only close the line as do not claim "
+            "(D-021).",
         )
     cap = charge.amount - pre.reimbursed_amount
     if pre.duplicate_of is not None and cap > ZERO:
@@ -388,7 +389,8 @@ def _fire(
             "evidence_contradicts_charge",
             f"evidence contradicts the charge for only part of it (coverage {a.coverage} of "
             f"quantity {charge.quantity}): {a.detail}.",
-            "Find evidence for the remaining units, or claim the covered part by override.",
+            "Find evidence for the remaining units and re-run, or file the covered part "
+            "outside Alibi; an override claims only the full remaining charge (D-021).",
         )
     if charge.charge_type == ChargeType.INBOUND_DEFECT_FEE and charge.defect_category is None:
         return Fired(

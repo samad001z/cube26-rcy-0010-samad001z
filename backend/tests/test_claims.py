@@ -336,3 +336,31 @@ def test_a_loss_event_claim_is_rejected_by_the_validator():
     assert "a loss event is never CLAIM (D-011, D-016)" in validate(
         forged, c, DictLookup([r], [c]), CFG
     )
+
+
+def test_human_override_flag_skips_only_the_contradicting_citation_check():
+    """D-021: a reviewer's CLAIM needs no contradicting citation (the stored reason stands in
+    for it); the cap and the loss-event refusal still apply."""
+    d, c, r = _claim_case()
+    bare = d.model_copy(update={"citations": []}).with_hash()
+    assert validate(bare, c, DictLookup([r], [c]), CFG, human_override=True) == []
+    big = bare.model_copy(
+        update={"claim": Claim(amount=Decimal("2.01"), currency="USD", computation=[])}
+    ).with_hash()
+    assert "claim 2.01 exceeds charged - reimbursed = 2.00" in validate(
+        big, c, DictLookup([r], [c]), CFG, human_override=True
+    )
+    loss_c = charge(charge_type=ChargeType.LOST_INBOUND, amount="2.00")
+    loss = bare.model_copy(
+        update={
+            "subject": bare.subject.model_copy(
+                update={
+                    "charge_type": ChargeType.LOST_INBOUND,
+                    "charge_content_hash": loss_c.compute_hash(),
+                }
+            )
+        }
+    ).with_hash()
+    assert "a loss event is never CLAIM (D-011, D-016)" in validate(
+        loss, loss_c, DictLookup([r], [loss_c]), CFG, human_override=True
+    )

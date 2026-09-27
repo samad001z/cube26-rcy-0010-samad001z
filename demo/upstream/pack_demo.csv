@@ -1,0 +1,2 @@
+record_id,unit_id,org_id,order_id,channel,order_lines,observed_in_box,operator_verdict,photo_refs,operator_id,captured_at
+DEMO-PCK-04,DEMO-U04,org_demo_alpha,DEMO-ORD-0004,shopify,DEMO-SKU-LAMP:1,DEMO-SKU-LAMP:1,seal,demo/pack/DEMO-U04_open_box.jpg,op_demo_kai,2026-08-16T12:00:00Z

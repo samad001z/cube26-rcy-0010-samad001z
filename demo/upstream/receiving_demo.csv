@@ -1,0 +1,3 @@
+record_id,unit_id,org_id,po_number,po_line,supplier,sku,asin,product_title,spec_colour,spec_variant,spec_components,cartons_ordered,cartons_received,units_per_carton_ordered,units_per_carton_counted,qty_ordered,qty_received,identity_match,carton_damage,unit_damage,quality_flags,photo_refs,operator_id,captured_at
+DEMO-RCV-01,DEMO-U01,org_demo_alpha,DEMO-PO-01,1,Demo Supplier North,DEMO-SKU-MUG,B0DEMO0001,Ceramic Mug,white,350ml,mug,1,1,12,12,12,12,yes,none,none,,demo/receiving/DEMO-U01_carton.jpg,op_demo_lee,2026-07-28T10:00:00Z
+DEMO-RCV-08,DEMO-U08,org_demo_alpha,DEMO-PO-02,1,Demo Supplier North,DEMO-SKU-HEADSET,B0DEMO0008,Wired Headset,black,standard,headset;usb cable,1,1,6,6,6,6,yes,none,none,,demo/receiving/DEMO-U08_carton.jpg,op_demo_lee,2026-07-29T11:15:00Z

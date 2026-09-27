@@ -8,7 +8,7 @@ export EVAL_MIGRATION_DATABASE_URL ?= postgresql+psycopg://alibi_owner:local_dev
 export ATTACHMENT_KEY_SECRET ?= local-dev-attachment-secret
 export LLM_ENABLED ?= false
 
-.PHONY: install db-up db-down migrate lint fmt test dev run sheet eval ui ui-build review-ui
+.PHONY: install db-up db-down migrate lint fmt test dev run demo sheet eval ui ui-build review-ui
 
 install:
 	cd backend && uv sync
@@ -44,6 +44,14 @@ ORG ?= org_demo_alpha
 run:
 	cd backend && uv run alibi run --report ../data/fee_report_sample.csv \
 		--upstream ../data/upstream/ --org $(ORG) $(if $(AS_OF),--as-of $(AS_OF),)
+
+# Demo data (demo/README.md): decide the demo report for org_demo_alpha, then check that the
+# run shows all three outcomes. Demo data only, never data/ or eval/. [AS_OF=YYYY-MM-DD]
+demo:
+	cd backend && uv run alibi run --report ../demo/fee_report_demo.csv \
+		--upstream ../demo/upstream/ --org org_demo_alpha --json $(if $(AS_OF),--as-of $(AS_OF),) \
+		> ../demo/.last_run.json
+	demo/check.sh demo/.last_run.json
 
 # Held-out eval (eval/README.md). `sheet` rebuilds the labelling sheet from eval/data.
 sheet:

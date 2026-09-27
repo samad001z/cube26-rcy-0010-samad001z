@@ -11,3 +11,4 @@ venv/
 .ruff_cache/
 .pytest_cache/
 .hypothesis/
+demo/.last_run.json

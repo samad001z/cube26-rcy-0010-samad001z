@@ -1,0 +1,2 @@
+record_id,unit_id,org_id,order_id,ordered_sku,ordered_asin,identity_match,parts_list,parts_missing,observed_state,amazon_condition,operator_disposition,photo_refs,operator_id,captured_at
+DEMO-RTN-08,DEMO-U08,org_demo_alpha,DEMO-ORD-0008,DEMO-SKU-HEADSET,B0DEMO0008,yes,headset;usb cable,,opened_unused,,restock,demo/returns/DEMO-U08_1.jpg,op_demo_sam,2026-09-10T16:20:00Z

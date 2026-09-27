@@ -62,7 +62,11 @@ curl -fsS "http://localhost:$API_PORT/health" >/dev/null || {
 }
 
 cd "$ROOT/frontend"
-[ -d node_modules ] || npm ci
+# Install when node_modules is missing or older than the lockfile (npm writes
+# node_modules/.package-lock.json on every install), so a pull that adds packages is picked up.
+if [ ! -f node_modules/.package-lock.json ] || [ package-lock.json -nt node_modules/.package-lock.json ]; then
+  npm ci
+fi
 cat <<EOF
 
   Review UI:  http://localhost:3000

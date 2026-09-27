@@ -1,6 +1,7 @@
 """Runtime settings, read from the environment and the repo-root .env (loaded automatically,
 whatever the working directory). Environment variables win over .env."""
 
+import os
 from decimal import Decimal
 from functools import lru_cache
 from pathlib import Path
@@ -77,6 +78,19 @@ def _one_line(exc: ValidationError) -> str:
 @lru_cache
 def get_settings() -> Settings:
     try:
-        return Settings()
+        return Settings(_env_file=None) if _skip_default_env_file() else Settings()
     except ValidationError as exc:
         raise SettingsError(_one_line(exc)) from None
+
+
+def _skip_default_env_file() -> bool:
+    """True when the test suite's ALIBI_TESTS_NO_ENV_FILE is set (backend/tests/conftest.py)
+    and nothing has deliberately repointed Settings.model_config["env_file"] elsewhere: a
+    test must never pick up the real repo-root .env (a developer's own prices, model id or
+    credentials path) just by calling get_settings() without asking for any of that, but a
+    test that explicitly points env_file at its own temp file (test_config.py) still gets
+    real env-file behaviour from it."""
+    return (
+        bool(os.environ.get("ALIBI_TESTS_NO_ENV_FILE"))
+        and Settings.model_config.get("env_file") == ENV_FILE
+    )

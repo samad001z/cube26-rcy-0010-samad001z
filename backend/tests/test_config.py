@@ -1,11 +1,13 @@
 """Settings: the repo-root .env is read automatically; a missing setting is one line."""
 
 import sys
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
 
 from app import cli
+from app.core import config
 from app.core.config import ENV_FILE, REPO_ROOT, Settings, SettingsError, get_settings
 
 REQUIRED = ("DATABASE_URL", "MIGRATION_DATABASE_URL", "ATTACHMENT_KEY_SECRET")
@@ -26,6 +28,37 @@ def test_env_file_is_the_repo_root_env_whatever_the_working_directory():
     assert ENV_FILE == REPO_ROOT / ".env" and ENV_FILE.is_absolute()
     assert (REPO_ROOT / ".env.example").is_file()
     assert Settings.model_config["env_file"] == ENV_FILE
+
+
+def test_the_developer_env_file_is_ignored_during_tests(tmp_path, monkeypatch):
+    """Fix 1: a .env with a real-looking price and LLM_ENABLED=true, sitting exactly where
+    Settings' default env_file points, must never reach a test that never asked for it. First
+    proves the leak is real (without the isolation flag, get_settings() reads it); then proves
+    ALIBI_TESTS_NO_ENV_FILE (set for the whole session by conftest.py) blocks it."""
+    fake_default_env = tmp_path / ".env"
+    fake_default_env.write_text("LLM_PRICE_INPUT_USD_PER_MTOK=9.99\nLLM_ENABLED=true\n")
+    # Plays the role of the untouched default: ENV_FILE and model_config["env_file"] equal,
+    # exactly what get_settings()._skip_default_env_file() checks before skipping it.
+    monkeypatch.setattr(config, "ENV_FILE", fake_default_env)
+    monkeypatch.setitem(Settings.model_config, "env_file", fake_default_env)
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://a@h/db")
+    monkeypatch.setenv("MIGRATION_DATABASE_URL", "postgresql+psycopg://o@h/db")
+    monkeypatch.setenv("ATTACHMENT_KEY_SECRET", "s3cret")
+    monkeypatch.delenv("LLM_PRICE_INPUT_USD_PER_MTOK", raising=False)
+    monkeypatch.delenv("LLM_ENABLED", raising=False)
+
+    monkeypatch.delenv("ALIBI_TESTS_NO_ENV_FILE", raising=False)
+    get_settings.cache_clear()
+    leaked = get_settings()
+    assert leaked.llm_price_input_usd_per_mtok == Decimal("9.99")
+    assert leaked.llm_enabled is True  # the loader really would find it: proves the scenario
+
+    monkeypatch.setenv("ALIBI_TESTS_NO_ENV_FILE", "1")
+    get_settings.cache_clear()
+    s = get_settings()
+    get_settings.cache_clear()
+    assert s.llm_price_input_usd_per_mtok is None
+    assert s.llm_enabled is False
 
 
 def test_values_are_read_from_the_env_file(no_env, tmp_path, monkeypatch):

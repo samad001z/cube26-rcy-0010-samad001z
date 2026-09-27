@@ -635,9 +635,20 @@ def test_a_real_outbound_https_call_fails():
 
 
 def test_llm_and_credentials_env_vars_are_forced_off():
-    # Guardian finding 3: a developer's or CI's own environment must never let a test reach
-    # a real model, even before any fixture in this file runs.
-    assert os.environ.get("LLM_ENABLED") == "false"
-    assert "GOOGLE_APPLICATION_CREDENTIALS" not in os.environ
+    # Guardian finding 3, and fix 1 (isolation from the developer's real .env): a developer's
+    # or CI's own environment, and their .env file, must never let a test reach a real model
+    # or read a real price, even before any fixture in this file runs.
+    for name in (
+        "LLM_ENABLED",
+        "LLM_PROVIDER",
+        "LLM_MODEL",
+        "GOOGLE_CLOUD_PROJECT",
+        "GOOGLE_CLOUD_LOCATION",
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        "LLM_PRICE_INPUT_USD_PER_MTOK",
+        "LLM_PRICE_OUTPUT_USD_PER_MTOK",
+    ):
+        assert name not in os.environ
+    assert os.environ.get("ALIBI_TESTS_NO_ENV_FILE") == "1"
     for proxy_var in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy"):
         assert proxy_var not in os.environ

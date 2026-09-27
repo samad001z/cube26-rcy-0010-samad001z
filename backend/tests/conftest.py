@@ -35,15 +35,28 @@ AS_OF = date(2026, 9, 25)
 #
 # A loopback proxy (HTTP_PROXY=http://127.0.0.1:<port>) would otherwise let traffic to it
 # through the loopback allowance and out to the real internet from there, so proxy env vars
-# are cleared too. LLM_ENABLED and GOOGLE_APPLICATION_CREDENTIALS are forced off so a
-# developer's or CI's own environment can never turn a test into a real model call.
+# are cleared too.
+#
+# Every LLM_* and GOOGLE_* variable is removed from the process environment: a developer's
+# shell may export these directly (not just through .env). That alone is not enough, since
+# app.core.config.Settings reads the repo-root .env automatically and env vars merely being
+# absent does not stop that fallback — a real price, model id or credentials path sitting in
+# the developer's .env would otherwise still reach a test that never asked for it (this is
+# what let a real LLM_PRICE_INPUT_USD_PER_MTOK leak into test_llm_db.py). ALIBI_TESTS_NO_ENV_FILE
+# tells app.core.config.get_settings() to build Settings with `_env_file=None` for the rest of
+# the session, so long as nothing has deliberately repointed Settings.model_config["env_file"]
+# elsewhere (test_config.py does exactly that, with its own temp file, and is still honoured:
+# get_settings() only disables the *default* real .env). A test that needs a price or model
+# sets it explicitly, via monkeypatch.setenv or a kwarg to Settings(...).
 _PROXY_VARS = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy")
 for _proxy_var in _PROXY_VARS:
     os.environ.pop(_proxy_var, None)
 os.environ["NO_PROXY"] = "*"
 os.environ["no_proxy"] = "*"
-os.environ["LLM_ENABLED"] = "false"
-os.environ.pop("GOOGLE_APPLICATION_CREDENTIALS", None)
+for _name in list(os.environ):
+    if _name.startswith(("LLM_", "GOOGLE_")):
+        os.environ.pop(_name, None)
+os.environ["ALIBI_TESTS_NO_ENV_FILE"] = "1"
 
 
 def _is_loopback(address: object) -> bool:

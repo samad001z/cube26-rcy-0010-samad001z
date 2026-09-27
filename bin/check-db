@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # Checks roles, RLS and grants of a migrated Alibi database (deploy/check-db.sql).
-#   bin/check-db "<owner connection URL>" [schema]     schema: alibi (Supabase) or public
+#   CHECK_DB_URL="<owner connection URL>" bin/check-db [schema]     schema: alibi or public
+# The URL (it carries a password) is read from the environment, never a command-line
+# argument, so it never lands in the shell's history or another user's `ps` output.
 # Fails if any check is false. The SSL check is only enforced for non-local hosts.
 set -euo pipefail
-url="${1:?usage: bin/check-db <owner-url> [schema]}"
-schema="${2:-alibi}"
+url="${CHECK_DB_URL:?usage: CHECK_DB_URL=<owner-url> bin/check-db [schema]}"
+schema="${1:-alibi}"
 # psql wants a plain postgresql:// URL (SQLAlchemy's +psycopg suffix is dropped).
 url="${url/postgresql+psycopg:/postgresql:}"
 out="$(psql "$url" -X -v ON_ERROR_STOP=1 -v schema="$schema" -At -F $'\t' \

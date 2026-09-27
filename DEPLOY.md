@@ -38,9 +38,13 @@ and Supabase `ap-south-1` (both Mumbai), Vercel functions `bom1`. Change them to
    export ALIBI_OWNER_PASSWORD="$(openssl rand -hex 24)"   # keep both in your password manager
    export ALIBI_APP_PASSWORD="$(openssl rand -hex 24)"
    psql "postgresql://postgres.$SUPA_REF@$SUPA_HOST:5432/postgres?sslmode=require" \
-     -v ON_ERROR_STOP=1 -v owner_pw="$ALIBI_OWNER_PASSWORD" -v app_pw="$ALIBI_APP_PASSWORD" \
-     -f deploy/supabase.sql
+     -v ON_ERROR_STOP=1 -f deploy/supabase.sql
    ```
+
+   `deploy/supabase.sql` reads `ALIBI_OWNER_PASSWORD` and `ALIBI_APP_PASSWORD` from the
+   environment with psql's `\getenv`, so they are never typed as a `-v` command-line
+   argument (both are already exported above; psql inherits the environment of the shell
+   that runs it).
 
    `alibi_owner` owns the schema and runs migrations; `alibi_app` is what the API uses.
    Neither is a superuser, both are `NOBYPASSRLS`. The tables live in schema `alibi`
@@ -56,7 +60,7 @@ Migrations run from your machine as the owner, never from the API:
 export OWNER_URL="postgresql+psycopg://alibi_owner.$SUPA_REF:$ALIBI_OWNER_PASSWORD@$SUPA_HOST:5432/postgres?sslmode=require"
 export APP_URL="postgresql+psycopg://alibi_app.$SUPA_REF:$ALIBI_APP_PASSWORD@$SUPA_HOST:5432/postgres?sslmode=require"
 MIGRATION_DATABASE_URL="$OWNER_URL" make migrate
-bin/check-db "$OWNER_URL" alibi
+CHECK_DB_URL="$OWNER_URL" bin/check-db alibi
 ```
 
 `bin/check-db` must end with `all checks passed`: RLS enabled and forced on every table,

@@ -1,14 +1,21 @@
 -- Alibi on Supabase Postgres: roles and schema. Run once, as the `postgres` user, with psql
--- (passwords come from psql variables, never from this file):
+-- (the new passwords are read from the environment with \getenv, never typed as a command-
+-- line argument, so they never land in the shell's history or another user's `ps` output):
 --
---   psql "$SUPABASE_ADMIN_URL" -v ON_ERROR_STOP=1 \
---     -v owner_pw="$ALIBI_OWNER_PASSWORD" -v app_pw="$ALIBI_APP_PASSWORD" -f deploy/supabase.sql
+--   ALIBI_OWNER_PASSWORD="$ALIBI_OWNER_PASSWORD" ALIBI_APP_PASSWORD="$ALIBI_APP_PASSWORD" \
+--     psql "$SUPABASE_ADMIN_URL" -v ON_ERROR_STOP=1 -f deploy/supabase.sql
 --
 -- alibi_owner owns the schema and runs the migrations. alibi_app is what the API connects
 -- as. Neither is a superuser and neither can bypass row-level security, so the forced RLS
 -- policies apply to both. The tables live in their own schema `alibi`, not `public`:
 -- Supabase publishes `public` through its Data API (PostgREST) to the anon and
 -- authenticated roles; `alibi` is not in the exposed schemas and those roles get nothing.
+
+\getenv owner_pw ALIBI_OWNER_PASSWORD
+\getenv app_pw ALIBI_APP_PASSWORD
+-- If either is not set, ":'owner_pw'" / ":'app_pw'" below is left unexpanded, which is a
+-- syntax error: with -v ON_ERROR_STOP=1 (required, see the header) psql stops with a
+-- non-zero exit status rather than creating a role with no password or the literal text.
 
 CREATE ROLE alibi_owner LOGIN PASSWORD :'owner_pw'
   NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;

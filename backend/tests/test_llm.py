@@ -2,6 +2,7 @@
 recorded-shape responses, the validator, fallback to the template, cost, and hashing."""
 
 import json
+import os
 import socket
 from dataclasses import replace
 from decimal import Decimal
@@ -444,3 +445,33 @@ def test_tests_cannot_reach_the_network():
             s.connect(("8.8.8.8", 443))
     finally:
         s.close()
+
+
+def test_connect_ex_is_blocked_too():
+    # Guardian finding 3: only `connect` was guarded; a client using `connect_ex` (as some
+    # HTTP libraries do for non-blocking sockets) could still reach out.
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        with pytest.raises(RuntimeError, match="network access blocked"):
+            s.connect_ex(("8.8.8.8", 443))
+    finally:
+        s.close()
+
+
+def test_a_real_outbound_https_call_fails():
+    # Guardian finding 3: a loopback HTTP proxy would otherwise let traffic through the
+    # loopback allowance and out to the real internet from there.
+    import urllib.error
+    import urllib.request
+
+    with pytest.raises((RuntimeError, OSError, urllib.error.URLError)):
+        urllib.request.urlopen("https://oauth2.googleapis.com/token", timeout=2)
+
+
+def test_llm_and_credentials_env_vars_are_forced_off():
+    # Guardian finding 3: a developer's or CI's own environment must never let a test reach
+    # a real model, even before any fixture in this file runs.
+    assert os.environ.get("LLM_ENABLED") == "false"
+    assert "GOOGLE_APPLICATION_CREDENTIALS" not in os.environ
+    for proxy_var in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy"):
+        assert proxy_var not in os.environ

@@ -1,0 +1,14 @@
+cd backend && uv run alibi llm-smoke --org org_demo_alpha  \
+	
+provider  vertex  project bytesofjoy-501900  location us-central1
+model     gemini-2.5-flash  (timeout 20s, one attempt)
+auth      /home/samad_001z/.secrets/alibi-vertex.json
+decision  DEMO-F01-1  CLAIM  R_CONTRADICTED_FULL  (run ad674889-34db-421a-aae1-aa467f7c1c40)
+
+served by gemini-2.5-flash
+latency   4476 ms
+tokens    in 1325  out 551 (incl. thinking)
+cost      0.001775 USD (estimate)
+
+MODEL EXPLANATION USED (validated against the decision trace):
+CLAIM. The evidence showed that the inbound_defect_fee of 3.20 was contradicted. Prep check DEMO-PRP-01 for polybag_present_sealed passed before the fee was posted. The amount to claim is 3.20.

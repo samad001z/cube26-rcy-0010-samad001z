@@ -24,8 +24,35 @@ make review-ui      # migrate, decide the sample report for both demo orgs, API 
 Open http://localhost:3000 and sign in with a key printed by the command
 (`dev-only-alpha-review-key` for `org_demo_alpha`, `dev-only-bravo-review-key` for
 `org_demo_bravo`). These keys are for local use only. The UI shows every decision of the
-newest run with REVIEW first, the evidence trail behind each one, and a form to override a
-decision with a mandatory reason; the override history is kept, never overwritten.
+newest run with REVIEW first, the evidence behind each one on a timeline, and a side sheet to
+override a decision with a mandatory reason; the override history is kept, never overwritten.
+Details in [`frontend/README.md`](frontend/README.md).
+
+| Sign in | Decisions |
+|---|---|
+| ![Sign-in page](docs/screenshots/signin-light.png) | ![Decisions of the demo run](docs/screenshots/decisions-light.png) |
+| **Decision detail** | **Override** |
+| ![Decision detail with evidence timeline](docs/screenshots/detail-light.png) | ![Override side sheet with CLAIM refused](docs/screenshots/override-light.png) |
+
+Dark-mode versions and a phone-width capture are in [`docs/screenshots/`](docs/screenshots/).
+The screenshots show the demo data below.
+
+### Demo data
+
+[`demo/`](demo/README.md) holds a small, made-up fee report (10 lines, `DEMO-` identifiers,
+all `org_demo_alpha`) with its upstream files, built so one run shows all three outcomes:
+3 CLAIM, 3 DO NOT CLAIM and 4 REVIEW. **It is demo data**: separate from the sample data in
+`data/` and the held-out eval set in `eval/`, and not an accuracy result.
+
+```bash
+make demo           # decide the demo report for org_demo_alpha, then check each line (demo/check.sh)
+```
+
+In the UI: sign in as `org_demo_alpha`, then **Run a report → Load demo data**. A run decides
+every charge stored for the organisation, so on a database that already holds the sample
+report the demo run also contains those lines. For a demo-only run, run `make demo` on a fresh
+database before `make review-ui` (which then skips the sample for `org_demo_alpha`, since it
+already has a run).
 
 ---
 

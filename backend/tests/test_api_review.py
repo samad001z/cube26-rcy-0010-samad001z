@@ -696,3 +696,45 @@ def test_totals_are_decimal_sums_per_effective_decision(client, app_engine):
     assert moved["REVIEW"] == {"count": 1, "fees_charged": {}, "claimable": {}}
     assert moved["DO_NOT_CLAIM"] == {"count": 3, "fees_charged": {"USD": "4.25"}, "claimable": {}}
     assert moved["ALL"] == totals["ALL"]
+
+
+def test_totals_sum_across_claims_and_keep_currencies_apart(client, app_engine):
+    # Guardian finding 9: a mutant overwriting instead of adding, or ignoring currency,
+    # survived because the only test so far had a single CLAIM in a single currency.
+    org, key = _syn(9)
+    fees = [
+        charge("SYN-10", defect_category="label", unit_id="U-10", amount="2.00", org=org),
+        charge("SYN-11", defect_category="label", unit_id="U-11", amount="3.50", org=org),
+        charge(
+            "SYN-12",
+            defect_category="label",
+            unit_id="U-12",
+            amount="5.00",
+            currency="EUR",
+            org=org,
+        ),
+    ]
+    evidence = [
+        prep_all_pass("SYN-PRP-10", unit_id="U-10", org=org),
+        prep_all_pass("SYN-PRP-11", unit_id="U-11", org=org),
+        prep_all_pass("SYN-PRP-12", unit_id="U-12", org=org),
+    ]
+    with org_session(app_engine, org) as s:
+        fid = repo.upsert_ingest_file(s, org, "totals2.csv", uuid.uuid4().hex * 2, "fee_report")
+        repo.insert_charges(s, fees, fid)
+        ref = SourceRef(file_sha256="c" * 64, row=1, raw={})
+        sources = {(r.agent, r.record_id): ref for r in evidence}
+        repo.insert_records(s, evidence, sources, fid)
+    run = run_org(app_engine, org, AS_OF)
+    assert {d.subject.line_id: d.decision.value for d in run.decisions} == {
+        "SYN-10": "CLAIM",
+        "SYN-11": "CLAIM",
+        "SYN-12": "CLAIM",
+    }
+    totals = client.get("/decisions", headers=_h(key)).json()["totals"]
+    assert totals["ALL"]["count"] == 3
+    # Two USD claims must be added together, not the second overwriting the first, and the
+    # EUR claim must stay in its own bucket, not merged into USD.
+    assert totals["ALL"]["fees_charged"] == {"EUR": "5.00", "USD": "5.50"}
+    assert totals["ALL"]["claimable"] == {"EUR": "5.00", "USD": "5.50"}
+    assert totals["CLAIM"] == totals["ALL"]

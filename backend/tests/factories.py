@@ -25,6 +25,7 @@ def charge(
     fba_shipment_id: str | None = "FBA-1",
     order_id: str | None = None,
     defect_category: str | None = None,
+    currency: str = "USD",
     org: str = ORG,
 ) -> Charge:
     return Charge(
@@ -39,6 +40,7 @@ def charge(
         charge_type=charge_type,
         quantity=quantity,
         amount=Decimal(amount),
+        currency=currency,
         posted_date=posted,
         defect_category=defect_category,
         source=SourceRef(file_sha256="0" * 64, row=1, raw={"line_id": line_id}),

@@ -35,6 +35,7 @@ Mapping (fee lines): CONTRADICTED with full coverage -> CLAIM. SUPPORTED -> DO_N
 12. **Never weaken a test to pass it.** Do not edit fixtures, eval labels or expected outputs to match code. If you think one is wrong, stop and ask the human.
 13. **No fake completeness.** No mocks in the eval path, no hardcoded results, no TODO stubs in core paths. Report real command output before claiming anything is done.
 14. **No secrets in git.** `.env` is gitignored; `.env.example` has placeholders only.
+15. **Migrations are append-only.** Every schema change goes in a new Alembic migration. Never edit an existing migration, even one not yet merged (human lead, 2026-09-27; 0004 was edited in place once on Day 4 and dev databases at 0004 needed a downgrade and re-upgrade).
 
 ## Forbidden language (docs, UI, README, LinkedIn)
 

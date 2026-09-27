@@ -5,7 +5,7 @@ Update at the end of every session. Newest entry on top.
 ### 2026-09-27 - Day 4 (review UI, overrides hardened, fail-open end to end), branch `day4-ui`
 - Done:
   - `day4-ui` from `origin/main`, with `day4-review`'s two commits cherry-picked (override flow, review endpoints, Next.js UI).
-  - D-021 approved by the human lead as written on 2026-09-27, then amended (stricter only) after the second rules-guardian review. The amendment block in D-021 still needs the human lead's confirmation.
+  - D-021 approved by the human lead as written on 2026-09-27, then amended (stricter only) after the second rules-guardian review. The amendment (A1, A2, A3) was approved by the human lead on 2026-09-27.
   - Human CLAIM override is refused for:
     - pending records, loss events and fee refund lines;
     - an amount that is not the charge itself (claim_basis not full_amount, or amount_computable not PASS);
@@ -59,7 +59,6 @@ Update at the end of every session. Newest entry on top.
   - `make eval` and anything on eval/ data were never run: the labels are still blank.
 - Open issues:
   - Two humans still need to label `eval/labelling_sheet.csv` before `make eval`. This is the blocker for the evaluation section.
-  - The D-021 amendment (A1, A2, A3 and the rest of the second- and third-review changes) awaits the human lead's confirmation.
   - The post-insert newest-decision check does not catch a run committing between it and the override's commit (`run_org` takes no lock); that override then shows as `earlier_override` on the new run.
   - Reviewer identity is self-declared (the org key identifies an organisation, not a person).
   - Loss-event claims are filed outside Alibi.
@@ -68,7 +67,8 @@ Update at the end of every session. Newest entry on top.
   - `alibi_test` is shared: two concurrent `make test` runs clobber each other. A per-run database name would fix it.
   - No request-size limit in front of the app yet (deploy work).
 - Environment: no Docker. Postgres 16 is the container install, with roles and databases from `docker/postgres/init.sh`. Node 22 was preinstalled; Playwright 1.56 is global, with Chromium in /opt/pw-browsers. The push needed the repo added to the session's GitHub scope.
-- Next step: human lead confirms the D-021 amendment and merges `day4-ui`; labelling; Day 5 LLM layer and deploy.
+- D-021 amendment (A1, A2, A3) approved by the human lead on 2026-09-27. New rule 15 in CLAUDE.md: schema changes go in new migrations only; existing migrations are never edited.
+- Next step: human lead merges `day4-ui`; labelling; Day 5 LLM layer and deploy.
 
 ### 2026-09-26 - Day 4 (overrides, review endpoints, review UI), branch `day4-review` (cherry-picked onto `day4-ui` on 2026-09-27)
 - Done:

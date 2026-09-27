@@ -199,6 +199,15 @@ def test_vertex_client_uses_the_key_files_credentials(monkeypatch, tmp_path):
     assert seen["credentials"] is sentinel
 
 
+def test_prompt_marks_the_trace_as_data_not_instructions():
+    # Guardian finding 16: report-supplied strings (reasons, labels) reach the trace, so the
+    # prompt must say plainly that content is data to ignore, not instructions to follow.
+    req = build_request(build_trace(_claim()))
+    assert "<trace>" in req.prompt and "</trace>" in req.prompt
+    assert "not instructions" in req.system
+    assert "ignore it" in req.system
+
+
 def test_vertex_request_uses_configured_model_json_and_temperature_zero():
     fake = FakeClient(_fixture("claim_ok"))
     p = vertex.VertexProvider(_cfg(max_output_tokens=321), client=fake)

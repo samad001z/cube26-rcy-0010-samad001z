@@ -42,7 +42,8 @@ class TraceEcho:
 
     def generate(self, request: LLMRequest) -> LLMResponse:
         self.requests.append(request)
-        trace: dict[str, Any] = json.loads(request.prompt.split("TRACE:\n", 1)[1])
+        inner = request.prompt.split("<trace>\n", 1)[1].rsplit("\n</trace>", 1)[0]
+        trace: dict[str, Any] = json.loads(inner)
         text = (
             f"{DECISION_WORDS[trace['decision']]}. Rule {trace['rule_id']} fired for "
             f"{trace['line_id']} on unit {trace['unit_id']}."

@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" role="img" aria-label="Alibi">
+<title>Alibi</title>
+<defs>
+    <linearGradient id="m-bg" x1="8" y1="0" x2="56" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#3B82F6"/>
+      <stop offset="1" stop-color="#1D4ED8"/>
+    </linearGradient>
+    <linearGradient id="m-tick" x1="22" y1="40" x2="44" y2="24" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#A7F3D0"/>
+      <stop offset="1" stop-color="#5EEAD4"/>
+    </linearGradient>
+    <linearGradient id="m-sheen" x1="32" y1="0" x2="32" y2="34" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+</defs>
+<rect width="64" height="64" rx="15" fill="url(#m-bg)"/>
+  <rect width="64" height="64" rx="15" fill="url(#m-sheen)"/>
+  <rect x="0.5" y="0.5" width="63" height="63" rx="14.5" fill="none" stroke="#FFFFFF" stroke-opacity="0.18"/>
+  <path d="M11 19V13.5A2.5 2.5 0 0 1 13.5 11H19" stroke="#FFFFFF" stroke-opacity="0.55" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <path d="M45 11H50.5A2.5 2.5 0 0 1 53 13.5V19" stroke="#FFFFFF" stroke-opacity="0.55" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <path d="M53 45V50.5A2.5 2.5 0 0 1 50.5 53H45" stroke="#FFFFFF" stroke-opacity="0.55" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <path d="M19 53H13.5A2.5 2.5 0 0 1 11 50.5V45" stroke="#FFFFFF" stroke-opacity="0.55" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <mask id="m-cut" maskUnits="userSpaceOnUse" x="0" y="0" width="64" height="64"><rect width="64" height="64" fill="#fff"/><path d="M24.6 34.6L29.4 39.2L42.8 25.8" stroke="#000" stroke-width="9.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/></mask>
+  <path d="M20.8 46.4L32 17.8L43.2 46.4" mask="url(#m-cut)" stroke="#FFFFFF" stroke-width="4.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <path d="M24.6 34.6L29.4 39.2L42.8 25.8" stroke="url(#m-tick)" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+</svg>

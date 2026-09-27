@@ -1,4 +1,7 @@
-# Alibi — Recovery Manager
+<p align="center"><picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/brand/alibi-banner-dark.svg">
+  <img alt="Alibi: every charge deserves an alibi" src="docs/brand/alibi-banner-light.svg" width="100%">
+</picture></p>
 
 Decides whether a marketplace fee or reimbursement charge should be claimed, and shows the evidence it used.
 

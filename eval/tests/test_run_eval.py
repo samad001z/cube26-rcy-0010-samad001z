@@ -391,6 +391,11 @@ def test_single_labeller_report_states_agreement_not_measured():
         commit="0" * 40, ag=None, gold=gold, lab=lab, run=run, charge_types=types
     )
     assert report.count(run_eval.SINGLE_LABELLER_NOTICE) >= 2  # top (method) and Limitations
+    # Fix 3: the exact required wording, not just the constant it's built from.
+    assert "Single human labeller." in report
+    assert "participant handbook asks for two independent labellers" in report
+    assert "second labeller was not available" in report
+    assert "inter-rater agreement (Cohen's kappa) is not measured" in report
     assert "## 1. Labelling" in report
     assert "## 1. Agreement between the two labellers" not in report
     assert "## Limitations" in report

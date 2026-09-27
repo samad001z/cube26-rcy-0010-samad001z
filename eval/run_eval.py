@@ -89,7 +89,11 @@ EXIT_REFUSED, EXIT_UNRESOLVED, EXIT_FALSE_CLAIMS, EXIT_DROPPED = 2, 3, 4, 5
 # scored on data nobody labelled.
 DATA_FILES = sorted(DATA_DIR.rglob("*.csv"))
 SHEET_COLUMNS = ("case_id", "charge_line", "evidence_summary")
-SINGLE_LABELLER_NOTICE = "Single human labeller; inter-rater agreement not measured."
+SINGLE_LABELLER_NOTICE = (
+    "Single human labeller. The participant handbook asks for two independent labellers; a "
+    "second labeller was not available, so inter-rater agreement (Cohen's kappa) is not "
+    "measured."
+)
 
 
 class EvalRefused(RuntimeError):

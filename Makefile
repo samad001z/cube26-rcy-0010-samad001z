@@ -8,7 +8,7 @@ export EVAL_MIGRATION_DATABASE_URL ?= postgresql+psycopg://alibi_owner:local_dev
 export ATTACHMENT_KEY_SECRET ?= local-dev-attachment-secret
 export LLM_ENABLED ?= false
 
-.PHONY: install db-up db-down migrate lint fmt test dev run sheet eval ui ui-build
+.PHONY: install db-up db-down migrate lint fmt test dev run sheet eval ui ui-build review-ui
 
 install:
 	cd backend && uv sync
@@ -59,3 +59,8 @@ ui:
 
 ui-build:
 	cd frontend && npm ci && npx eslint && npx next build
+
+# One command: migrate, decide the sample for both demo orgs if they have no run, start the
+# API on :8000 with dev-only keys and the UI on :3000 (bin/review-ui). Needs Postgres up.
+review-ui:
+	bin/review-ui

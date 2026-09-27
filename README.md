@@ -12,6 +12,23 @@
 
 ---
 
+## Alibi: run the review UI locally
+
+Needs Postgres 16 (`make db-up`, or your own with `docker/postgres/init.sh`), uv and Node LTS.
+
+```bash
+make install        # backend dependencies, once
+make review-ui      # migrate, decide the sample report for both demo orgs, API on :8000, UI on :3000
+```
+
+Open http://localhost:3000 and sign in with a key printed by the command
+(`dev-only-alpha-review-key` for `org_demo_alpha`, `dev-only-bravo-review-key` for
+`org_demo_bravo`). These keys are for local use only. The UI shows every decision of the
+newest run with REVIEW first, the evidence trail behind each one, and a form to override a
+decision with a mandatory reason; the override history is kept, never overwritten.
+
+---
+
 ## Your problem statement: Recovery Manager
 
 |                              |                                                          |
